@@ -684,6 +684,23 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
+          "expr": "npm_replicator_events_document_count{status=\"faulty\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Faulty",
+          "range": true,
+          "refId": "Faulty",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "default_prometheus_ds"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
           "expr": "npm_replicator_events_document_count{status=\"up-to-date\"}",
           "fullMetaSearch": false,
           "hide": false,

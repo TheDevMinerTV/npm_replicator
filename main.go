@@ -505,6 +505,7 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 		}
 		outOfDate := 0
 		upToDate := 0
+		faulty := 0
 
 		for statusView.Next() {
 			var key string
@@ -518,9 +519,11 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 				output = &outOfDate
 			} else if key == "up-to-date" {
 				output = &upToDate
+			} else if key == "faulty" {
+				output = &faulty
 			} else {
-				log.Error().Str("key", key).Msg("unknown key")
-				return
+				log.Warn().Str("key", key).Msg("unknown key")
+				continue
 			}
 
 			if err := statusView.ScanValue(output); err != nil {
@@ -535,6 +538,7 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 
 		localDocumentCount.With(prometheus.Labels{"status": "out-of-date"}).Set(float64(outOfDate))
 		localDocumentCount.With(prometheus.Labels{"status": "up-to-date"}).Set(float64(upToDate))
+		localDocumentCount.With(prometheus.Labels{"status": "faulty"}).Set(float64(faulty))
 	}
 }
 
