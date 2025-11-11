@@ -387,15 +387,18 @@ func main() {
 
 							return
 						} else {
-							latestTag, ok := metadata.DistTags["latest"]
-							if !ok {
-								log.Error().Interface("dist_tags", metadata.DistTags).Msg("Package has no latest tag")
-								return
-							}
-							version, ok := metadata.Versions[latestTag]
-							if !ok {
-								log.Error().Str("latest_tag", latestTag).Msg("Latest tag is not a valid version")
-								return
+							var version npm.Version
+
+							if latestTag, ok := metadata.DistTags["latest"]; !ok {
+								log.Warn().Interface("dist_tags", metadata.DistTags).Msg("Package has no latest tag")
+							} else {
+								latestVersion, ok := metadata.Versions[latestTag]
+								if !ok {
+									log.Warn().Str("latest_tag", latestTag).Msg("Latest tag is not a valid version")
+									return
+								}
+
+								version = latestVersion
 							}
 
 							// generate new package document so that we don't have stale information in there
