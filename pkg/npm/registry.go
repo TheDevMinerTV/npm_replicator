@@ -14,7 +14,7 @@ type PackageMetadata struct {
 	Repository   *Repository        `json:"repository,omitempty"`
 	Author       *User              `json:"author,omitempty"`
 	Maintainers  []User             `json:"maintainers,omitempty"`
-	Contributors *User              `json:"contributors,omitempty"`
+	Contributors []User             `json:"contributors,omitempty"`
 	DistTags     map[string]string  `json:"dist-tags"`
 	Versions     map[string]Version `json:"versions"`
 	Time         map[string]string  `json:"time"`
@@ -132,7 +132,7 @@ type Version struct {
 	Version      string      `json:"version"`
 	Author       *User       `json:"author,omitempty"`
 	Maintainers  []User      `json:"maintainers,omitempty"`
-	Contributors *User       `json:"contributors,omitempty"`
+	Contributors []User      `json:"contributors,omitempty"`
 	Dist         struct {
 		Tarball      string `json:"tarball"`
 		FileCount    *int   `json:"fileCount,omitempty"`
