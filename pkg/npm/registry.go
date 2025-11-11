@@ -9,11 +9,15 @@ import (
 )
 
 type PackageMetadata struct {
-	Name        string       `json:"name"`
-	Keywords    []string     `json:"keywords,omitempty"`
-	Repository  *Repository  `json:"repository,omitempty"`
-	Author      *Author      `json:"author,omitempty"`
-	Maintainers []Maintainer `json:"maintainers,omitempty"`
+	Name         string             `json:"name"`
+	Keywords     []string           `json:"keywords,omitempty"`
+	Repository   *Repository        `json:"repository,omitempty"`
+	Author       *User              `json:"author,omitempty"`
+	Maintainers  []User             `json:"maintainers,omitempty"`
+	Contributors *User              `json:"contributors,omitempty"`
+	DistTags     map[string]string  `json:"dist-tags"`
+	Versions     map[string]Version `json:"versions"`
+	Time         map[string]string  `json:"time"`
 }
 
 func (c *Client) PackageMetadata(ctx context.Context, name string) (*PackageMetadata, error) {
@@ -68,12 +72,27 @@ func (r *Repository) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type Maintainer struct {
+type User struct {
 	Name  string  `json:"name"`
 	Email *string `json:"email,omitempty"`
 }
 
-func (m *Maintainer) UnmarshalJSON(data []byte) error {
+func (u *User) UnmarshalJSON(data []byte) error {
+	{
+		// try decoding as string
+		var t string
+		if err := json.Unmarshal(data, &t); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			u.Name = t
+			u.Email = nil
+			return nil
+		}
+	}
+
 	var t struct {
 		Name  string  `json:"name"`
 		Email *string `json:"email,omitempty"`
@@ -82,28 +101,60 @@ func (m *Maintainer) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	m.Name = t.Name
-	m.Email = t.Email
+	u.Name = t.Name
+	u.Email = t.Email
 
 	return nil
 }
 
-type Author struct {
-	Name  string  `json:"name"`
-	Email *string `json:"email,omitempty"`
+type Version struct {
+	Name         string      `json:"name"`
+	Keywords     []string    `json:"keywords,omitempty"`
+	Repository   *Repository `json:"repository,omitempty"`
+	Version      string      `json:"version"`
+	Author       *User       `json:"author,omitempty"`
+	Maintainers  []User      `json:"maintainers,omitempty"`
+	Contributors *User       `json:"contributors,omitempty"`
+	Dist         struct {
+		Tarball      string `json:"tarball"`
+		FileCount    *int   `json:"fileCount,omitempty"`
+		UnpackedSize *int   `json:"unpackedSize,omitempty"`
+	}
+	Dependencies    map[string]string `json:"dependencies,omitempty"`
+	DevDependencies map[string]string `json:"devDependencies,omitempty"`
+	Engines         Engines           `json:"engines,omitempty"`
 }
 
-func (m *Author) UnmarshalJSON(data []byte) error {
-	var t struct {
-		Name  string  `json:"name"`
-		Email *string `json:"email,omitempty"`
+type Engines map[string]string
+
+func (e *Engines) UnmarshalJSON(data []byte) error {
+	{
+		// try decoding as { name: string; version: string }[]
+		var t []struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		}
+		if err := json.Unmarshal(data, &t); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			*e = make(map[string]string, len(t))
+			for _, v := range t {
+				(*e)[v.Name] = v.Version
+			}
+
+			return nil
+		}
 	}
+
+	var t map[string]string
 	if err := json.Unmarshal(data, &t); err != nil {
 		return err
 	}
 
-	m.Name = t.Name
-	m.Email = t.Email
+	*e = t
 
 	return nil
 }

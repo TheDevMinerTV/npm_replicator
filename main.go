@@ -91,7 +91,7 @@ var (
 	fChangestreamFetchInterval = flag.Duration("changes-fetch-interval", 10*time.Second, "Interval between changes fetches")
 	fChangestreamBatchSize     = flag.Int("changes-batch-size", 1000, "Batch size for changes fetches")
 
-	fBatchedMetadataUpdateInterval = flag.Duration("metadata-update-interval", 10*time.Minute, "Interval between batched metadata updates")
+	fBatchedMetadataUpdateInterval = flag.Duration("metadata-update-interval", 15*time.Second, "Interval between batched metadata updates")
 	fMetadataUpdateBatchSize       = flag.Int("metadata-update-batch-size", 10, "Batch size for metadata updates")
 )
 
@@ -183,6 +183,9 @@ func main() {
 
 	wg.Go(func() {
 		ticker := time.Tick(*fStatsUpdateInterval)
+		log.Info().
+			Dur("interval", *fStatsUpdateInterval).
+			Msg("Starting stats updater")
 
 		defer func() {
 			if err := recover(); err != nil {
@@ -202,6 +205,10 @@ func main() {
 
 	wg.Go(func() {
 		ticker := time.Tick(*fChangestreamFetchInterval)
+		log.Info().
+			Dur("interval", *fChangestreamFetchInterval).
+			Int("batch_size", *fChangestreamBatchSize).
+			Msg("Starting changestream fetcher")
 
 		for {
 			select {
@@ -310,6 +317,10 @@ func main() {
 		}()
 
 		ticker := time.Tick(*fBatchedMetadataUpdateInterval)
+		log.Info().
+			Dur("interval", *fBatchedMetadataUpdateInterval).
+			Int("batch_size", *fMetadataUpdateBatchSize).
+			Msg("Starting metadata updater")
 
 		for {
 			select {
@@ -317,8 +328,6 @@ func main() {
 				return
 
 			case <-ticker:
-				panic("not implemented")
-
 				statusView := db.Query(
 					ctx,
 					"_design/npm_replication",
@@ -349,30 +358,38 @@ func main() {
 						Str("package_id", packageID).
 						Logger()
 
+					log.Trace().Msg("Fetching metadata...")
+
 					metadata, err := npmClient.PackageMetadata(ctx, packageID)
 					if err != nil {
-						log.Error().Err(err).Msg("could not fetch package metadata")
+						log.Error().Err(err).Msg("Could not fetch package metadata")
+						continue
+					}
+
+					latestTag, ok := metadata.DistTags["latest"]
+					if !ok {
+						log.Error().Interface("dist_tags", metadata.DistTags).Msg("Package has no latest tag")
+						continue
+					}
+					version, ok := metadata.Versions[latestTag]
+					if !ok {
+						log.Error().Str("latest_tag", latestTag).Msg("Latest tag is not a valid version")
 						continue
 					}
 
 					// generate new package document so that we don't have stale information in there
 					pkg = RegistryPackage{
-						Rev_:        pkg.Rev_,
-						Name:        metadata.Name,
-						Keywords:    metadata.Keywords,
-						Author:      metadata.Author,
-						Repository:  metadata.Repository,
-						Maintainers: metadata.Maintainers,
+						Version: version,
+						Rev_:    pkg.Rev_,
 						Replicator: ReplicatorMetadata{
 							UpstreamRev: pkg.Replicator.UpstreamRev,
-							MetadataRev: nil,
+							// mark the metadata as updated
+							MetadataRev: &pkg.Replicator.UpstreamRev,
 						},
 					}
 
-					// mark as updated
-					//pkg.Replicator.MetadataRev = &pkg.Replicator.UpstreamRev
-
-					newRev, err := db.Put(ctx, packageID, pkg)
+					// background context to make sure all of these are done before actually allowing the goroutine to exit
+					newRev, err := db.Put(context.Background(), packageID, pkg)
 					if err != nil {
 						log.Error().Err(err).Msg("could not update replicator document")
 						continue
@@ -473,18 +490,15 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 }
 
 type ReplicatorMetadata struct {
-	UpstreamRev string  `json:"upstreamRev"`
-	MetadataRev *string `json:"metadataRev"`
+	UpstreamRev          string     `json:"upstreamRev"`
+	MetadataRev          *string    `json:"metadataRev"`
+	DownloadsLastUpdated *time.Time `json:"downloadsLastUpdated"`
 }
 
 type RegistryPackage struct {
-	Rev_ *string `json:"_rev,omitempty"`
+	npm.Version
 
-	Name        string           `json:"name"`
-	Keywords    []string         `json:"keywords,omitempty"`
-	Author      *npm.Author      `json:"author,omitempty"`
-	Repository  *npm.Repository  `json:"repository,omitempty"`
-	Maintainers []npm.Maintainer `json:"maintainers,omitempty"`
+	Rev_ *string `json:"_rev,omitempty"`
 
 	Replicator ReplicatorMetadata `json:"replicator"`
 }
