@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"net/http"
@@ -385,6 +386,24 @@ func main() {
 									Msg("refreshed metadata for package")
 							}
 
+							var jsonErr *json.UnmarshalTypeError
+							if errors.As(err, &jsonErr) {
+								log.Error().Err(err).Msg("Could not unmarshal JSON response from upstream registry")
+
+								pkg.Replicator.HasJSONParseError = true
+
+								// background context to make sure all of these are done before actually allowing the goroutine to exit
+								newRev, err := db.Put(context.Background(), packageID, pkg)
+								if err != nil {
+									log.Error().Err(err).Msg("could not update replicator document")
+									return
+								}
+
+								log.Debug().
+									Str("new_rev", newRev).
+									Msg("refreshed metadata for package")
+							}
+
 							return
 						} else {
 							var version npm.Version
@@ -525,6 +544,7 @@ type ReplicatorMetadata struct {
 	DownloadsLastUpdated *time.Time `json:"downloadsLastUpdated"`
 
 	FoundInChangestreamButNotInRegistry bool `json:"foundInChangestreamButNotInRegistry"`
+	HasJSONParseError                   bool `json:"hasJSONParseError"`
 }
 
 type RegistryPackage struct {
