@@ -13,8 +13,8 @@ type PackageMetadata struct {
 	Keywords     []string           `json:"keywords,omitempty"`
 	Repository   *Repository        `json:"repository,omitempty"`
 	Author       *User              `json:"author,omitempty"`
-	Maintainers  []User             `json:"maintainers,omitempty"`
-	Contributors []User             `json:"contributors,omitempty"`
+	Maintainers  Users              `json:"maintainers,omitempty"`
+	Contributors Users              `json:"contributors,omitempty"`
 	DistTags     map[string]string  `json:"dist-tags"`
 	Versions     map[string]Version `json:"versions"`
 	Time         map[string]string  `json:"time"`
@@ -121,6 +121,35 @@ func (u *User) UnmarshalJSON(data []byte) error {
 
 	u.Name = t.Name
 	u.Email = t.Email
+
+	return nil
+}
+
+type Users []User
+
+func (u Users) Len() int { return len(u) }
+
+func (u *Users) UnmarshalJSON(data []byte) error {
+	{
+		// try decoding as string
+		var t string
+		if err := json.Unmarshal(data, &t); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			*u = Users{User{Name: t}}
+			return nil
+		}
+	}
+
+	var t []User
+	if err := json.Unmarshal(data, &t); err != nil {
+		return err
+	}
+
+	*u = t
 
 	return nil
 }
