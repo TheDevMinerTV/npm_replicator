@@ -103,7 +103,7 @@ func (c *Client) runRequest(ctx context.Context, method, path string, queryParam
 			Bytes("response_body", resBody).
 			Msg("Could not query endpoint")
 
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, UnexpectedHttpStatusError{statusCode: resp.StatusCode}
 	}
 
 	return resp.Body, nil
@@ -119,4 +119,21 @@ func applyHeaders(target http.Header, source http.Header) {
 
 		h = append(h, values...)
 	}
+}
+
+type UnexpectedHttpStatusError struct {
+	statusCode int
+	body       []byte
+}
+
+func (e UnexpectedHttpStatusError) Error() string {
+	return fmt.Sprintf("unexpected status code: %d", e.statusCode)
+}
+
+func (e UnexpectedHttpStatusError) StatusCode() int {
+	return e.statusCode
+}
+
+func (e UnexpectedHttpStatusError) Body() []byte {
+	return e.body
 }

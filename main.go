@@ -20,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/thedevminertv/npm-replicator/pkg/httpclient"
 	"github.com/thedevminertv/npm-replicator/pkg/npm"
 )
 
@@ -341,6 +342,7 @@ func main() {
 					continue
 				}
 
+				var fetcherWg sync.WaitGroup
 				for statusView.Next() {
 					var packageID string
 					if err := statusView.ScanValue(&packageID); err != nil {
@@ -358,47 +360,72 @@ func main() {
 						Str("package_id", packageID).
 						Logger()
 
-					log.Trace().Msg("Fetching metadata...")
+					fetcherWg.Go(func() {
+						log.Trace().Msg("Fetching metadata...")
 
-					metadata, err := npmClient.PackageMetadata(ctx, packageID)
-					if err != nil {
-						log.Error().Err(err).Msg("Could not fetch package metadata")
-						continue
-					}
+						metadata, err := npmClient.PackageMetadata(ctx, packageID)
+						if err != nil {
+							log.Error().Err(err).Msg("Could not fetch package metadata")
 
-					latestTag, ok := metadata.DistTags["latest"]
-					if !ok {
-						log.Error().Interface("dist_tags", metadata.DistTags).Msg("Package has no latest tag")
-						continue
-					}
-					version, ok := metadata.Versions[latestTag]
-					if !ok {
-						log.Error().Str("latest_tag", latestTag).Msg("Latest tag is not a valid version")
-						continue
-					}
+							var httpErr httpclient.UnexpectedHttpStatusError
+							if errors.As(err, &httpErr) && httpErr.StatusCode() == http.StatusNotFound {
+								log.Error().Msg("Package not found in upstream registry, marking as bad document")
 
-					// generate new package document so that we don't have stale information in there
-					pkg = RegistryPackage{
-						Version: version,
-						Rev_:    pkg.Rev_,
-						Replicator: ReplicatorMetadata{
-							UpstreamRev: pkg.Replicator.UpstreamRev,
-							// mark the metadata as updated
-							MetadataRev: &pkg.Replicator.UpstreamRev,
-						},
-					}
+								pkg.Replicator.FoundInChangestreamButNotInRegistry = true
 
-					// background context to make sure all of these are done before actually allowing the goroutine to exit
-					newRev, err := db.Put(context.Background(), packageID, pkg)
-					if err != nil {
-						log.Error().Err(err).Msg("could not update replicator document")
-						continue
-					}
+								// background context to make sure all of these are done before actually allowing the goroutine to exit
+								newRev, err := db.Put(context.Background(), packageID, pkg)
+								if err != nil {
+									log.Error().Err(err).Msg("could not update replicator document")
+									return
+								}
 
-					log.Debug().
-						Str("new_rev", newRev).
-						Msg("refreshed metadata for package")
+								log.Debug().
+									Str("new_rev", newRev).
+									Msg("refreshed metadata for package")
+							}
+
+							return
+						} else {
+							latestTag, ok := metadata.DistTags["latest"]
+							if !ok {
+								log.Error().Interface("dist_tags", metadata.DistTags).Msg("Package has no latest tag")
+								return
+							}
+							version, ok := metadata.Versions[latestTag]
+							if !ok {
+								log.Error().Str("latest_tag", latestTag).Msg("Latest tag is not a valid version")
+								return
+							}
+
+							// generate new package document so that we don't have stale information in there
+							pkg = RegistryPackage{
+								Version: version,
+								Rev_:    pkg.Rev_,
+								Replicator: ReplicatorMetadata{
+									UpstreamRev: pkg.Replicator.UpstreamRev,
+									// mark the metadata as updated
+									MetadataRev: &pkg.Replicator.UpstreamRev,
+								},
+							}
+
+							// background context to make sure all of these are done before actually allowing the goroutine to exit
+							newRev, err := db.Put(context.Background(), packageID, pkg)
+							if err != nil {
+								log.Error().Err(err).Msg("could not update replicator document")
+								return
+							}
+
+							log.Debug().
+								Str("new_rev", newRev).
+								Msg("refreshed metadata for package")
+						}
+					})
+
+					log.Trace().Msg("Metadata fetcher goroutine started")
 				}
+				fetcherWg.Wait()
+
 				if statusView.Err() != nil {
 					log.Panic().Err(statusView.Err()).Msg("failed to fetch replicator document statuses")
 				}
@@ -493,6 +520,8 @@ type ReplicatorMetadata struct {
 	UpstreamRev          string     `json:"upstreamRev"`
 	MetadataRev          *string    `json:"metadataRev"`
 	DownloadsLastUpdated *time.Time `json:"downloadsLastUpdated"`
+
+	FoundInChangestreamButNotInRegistry bool `json:"foundInChangestreamButNotInRegistry"`
 }
 
 type RegistryPackage struct {

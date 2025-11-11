@@ -58,6 +58,24 @@ func (r *Repository) UnmarshalJSON(data []byte) error {
 		}
 	}
 
+	{
+		// try decoding as Repository array
+		var t []Repository
+		if err := json.Unmarshal(data, &t); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			if len(t) > 0 {
+				r.Type = t[0].Type
+				r.URL = t[0].URL
+			}
+
+			return nil
+		}
+	}
+
 	var t struct {
 		Type string `json:"type"`
 		URL  string `json:"url"`
