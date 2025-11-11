@@ -1,0 +1,38 @@
+services:
+  prometheus:
+    networks: [ default, web_default ]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+        - --web.external-url=https://npm.devminer.xyz/_prom
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.npm-prometheus.rule=Host(`npm.devminer.xyz`) && PathPrefix(`/_prom`)"
+      - traefik.http.routers.npm-prometheus.entrypoints=websecure
+      - traefik.http.routers.npm-prometheus.middlewares=authentik@docker
+      - traefik.http.services.npm-prometheus.loadbalancer.server.port=9090
+  grafana:
+    networks: [ default, web_default ]
+    environment:
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_BASIC_ENABLED=false
+      - GF_SERVER_ROOT_URL=https://npm.devminer.xyz
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.npm-grafana.rule=Host(`npm.devminer.xyz`)"
+      - traefik.http.routers.npm-grafana.entrypoints=websecure
+      - traefik.http.routers.npm-grafana.middlewares=authentik@docker
+      - traefik.http.services.npm-grafana.loadbalancer.server.port=3000
+
+  replicator:
+    build: ghcr.io/thedevminertv/npm-replicator:latest
+    command:
+      - --couchdb-url=<COUCHDB_URL>
+      - --couchdb-username=<COUCHDB_USERNAME>
+      - --couchdb-password=<COUCHDB_PASSWORD>
+      - --couchdb-database=registry
+      - --log-level=info
+
+networks:
+  web_default:
+    external: true
