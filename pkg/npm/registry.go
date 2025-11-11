@@ -168,6 +168,22 @@ func (e *Engines) UnmarshalJSON(data []byte) error {
 	}
 
 	{
+		// try decoding as string
+		var t string
+		if err := json.Unmarshal(data, &t); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			*e = make(map[string]string, 1)
+			(*e)[t] = "format unsupported"
+
+			return nil
+		}
+	}
+
+	{
 		// try decoding as string[]
 		var t []string
 		if err := json.Unmarshal(data, &t); err != nil {
