@@ -407,17 +407,20 @@ func main() {
 							return
 						} else {
 							var version npm.Version
+							var hasInvalidTag = false
 
 							if latestTag, ok := metadata.DistTags["latest"]; !ok {
 								log.Warn().Interface("dist_tags", metadata.DistTags).Msg("Package has no latest tag")
+								hasInvalidTag = true
 							} else {
 								latestVersion, ok := metadata.Versions[latestTag]
 								if !ok {
 									log.Warn().Str("latest_tag", latestTag).Msg("Latest tag is not a valid version")
-									return
+									hasInvalidTag = true
+								} else {
+									version = latestVersion
 								}
 
-								version = latestVersion
 							}
 
 							// generate new package document so that we don't have stale information in there
@@ -428,6 +431,7 @@ func main() {
 									UpstreamRev: pkg.Replicator.UpstreamRev,
 									// mark the metadata as updated
 									MetadataRev: &pkg.Replicator.UpstreamRev,
+									HasInvalidTag: hasInvalidTag,
 								},
 							}
 
@@ -549,6 +553,7 @@ type ReplicatorMetadata struct {
 
 	FoundInChangestreamButNotInRegistry bool `json:"foundInChangestreamButNotInRegistry"`
 	HasJSONParseError                   bool `json:"hasJSONParseError"`
+	HasInvalidTag                       bool `json:"hasInvalidTag"`
 }
 
 type RegistryPackage struct {
