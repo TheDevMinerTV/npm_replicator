@@ -18,7 +18,7 @@
   "editable": false,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 4,
+  "id": 1,
   "links": [],
   "panels": [
     {
@@ -860,7 +860,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "(\n  npm_replicator_upstream_document_count\n  - ignoring(status) npm_replicator_events_document_count{status=\"up-to-date\"}\n)\n/\n(\n  rate(npm_replicator_events_document_count{status=\"up-to-date\"}[5m])\n  or \n  rate(npm_replicator_upstream_document_count[5m])\n)",
+          "expr": "(\n  npm_replicator_upstream_document_count\n  - ignoring(status) npm_replicator_events_document_count{status=\"up-to-date\"}\n)\n/\nignoring (status) (\n  rate(npm_replicator_events_document_count{status=\"up-to-date\"}[5m])\n)",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -1024,5 +1024,5 @@
   "timezone": "browser",
   "title": "NPM Replicator",
   "uid": "df3ndculyvu2of",
-  "version": 23
+  "version": 2
 }
