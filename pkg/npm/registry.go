@@ -166,7 +166,7 @@ type Version struct {
 		Tarball      string `json:"tarball"`
 		FileCount    *int   `json:"fileCount,omitempty"`
 		UnpackedSize *int   `json:"unpackedSize,omitempty"`
-	}
+	} `json:"dist"`
 	Dependencies    map[string]string `json:"dependencies,omitempty"`
 	DevDependencies map[string]string `json:"devDependencies,omitempty"`
 	Engines         Engines           `json:"engines,omitempty"`
