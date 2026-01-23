@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -26,6 +27,11 @@ import (
 	"github.com/thedevminertv/npm-replicator/pkg/replicator"
 	"github.com/thedevminertv/npm-replicator/pkg/webhooks"
 )
+
+type stringSlice []string
+
+func (s *stringSlice) String() string         { return "" }
+func (s *stringSlice) Set(value string) error { *s = append(*s, value); return nil }
 
 var (
 	localDBActiveSize = prometheus.NewGauge(
@@ -99,12 +105,33 @@ var (
 	fMetadataUpdateBatchSize       = flag.Int("metadata-update-batch-size", 10, "Batch size for metadata updates")
 
 	fWebhooksEnabled = flag.Bool("webhooks-enabled", false, "Enable webhook notifications for package updates")
+
+	fWebhookAuthorizations stringSlice
 )
 
 func init() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
+	flag.Var(&fWebhookAuthorizations, "webhook-authorization", "Webhook authorization in format url=token (can be repeated)")
 	flag.Parse()
+
+	authMap := make(map[string]string)
+	for _, auth := range fWebhookAuthorizations {
+		parts := strings.Split(auth, "=")
+		if len(parts) != 2 {
+			log.Fatal().Str("auth", auth).Msg("Invalid webhook authorization format, expected url=token")
+		}
+		url := strings.TrimSpace(parts[0])
+		token := strings.TrimSpace(parts[1])
+		if url == "" || token == "" {
+			log.Fatal().Str("auth", auth).Msg("Webhook authorization url and token cannot be empty")
+		}
+		if _, exists := authMap[url]; exists {
+			log.Fatal().Str("url", url).Msg("Duplicate webhook authorization for URL")
+		}
+		authMap[url] = token
+	}
+	webhooks.WebhookAuthorizations = authMap
 
 	if *fCouchDBUsername != "" {
 		if *fCouchDBPassword == "" {

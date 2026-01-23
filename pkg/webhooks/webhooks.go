@@ -60,6 +60,8 @@ var (
 		},
 		[]string{"endpoint"},
 	)
+
+	WebhookAuthorizations map[string]string
 )
 
 const (
@@ -90,29 +92,33 @@ func CallWebhooksAsync(ctx context.Context, packageName string, payload []byte) 
 }
 
 func callWebhookWithRetry(ctx context.Context, client *httpclient.Client, url string, payload []byte, packageName string) {
-	logger := log.With().Str("webhook_url", url).Str("package", packageName).Logger()
+	log := log.With().Str("webhook_url", url).Str("package", packageName).Logger()
 
 	operation := func() error {
-		return callWebhookOnce(ctx, client, url, payload)
+		return callWebhookOnce(ctx, client, url, payload, log)
 	}
 
 	onRetry := func(attempt int) {
 		WebhookRetriesTotal.WithLabelValues(url).Inc()
 	}
 
-	err := retryWithExponentialBackoff(ctx, DefaultMaxRetries, DefaultBaseDelay, operation, logger, onRetry)
+	err := retryWithExponentialBackoff(ctx, DefaultMaxRetries, DefaultBaseDelay, operation, log, onRetry)
 	if err != nil {
-		logger.Error().Err(err).Msg("Webhook call failed after all retries")
+		log.Error().Err(err).Msg("Webhook call failed after all retries")
 		WebhookCallsTotal.WithLabelValues("failure", url).Inc()
 		return
 	}
 
-	logger.Info().Msg("Webhook call succeeded")
+	log.Info().Msg("Webhook call succeeded")
 	WebhookCallsTotal.WithLabelValues("success", url).Inc()
 }
 
-func callWebhookOnce(ctx context.Context, client *httpclient.Client, url string, payload []byte) error {
+func callWebhookOnce(ctx context.Context, client *httpclient.Client, url string, payload []byte, log zerolog.Logger) error {
 	headers := http.Header{"Content-Type": []string{"application/json"}}
+	if token, ok := WebhookAuthorizations[url]; ok {
+		log.Debug().Msg("Adding authorization header to webhook request")
+		headers["Authorization"] = []string{"Bearer " + token}
+	}
 	_, err := client.Post(ctx, url, nil, headers, bytes.NewReader(payload), func(code int) bool { return code >= 200 && code < 300 })
 	return err
 }
