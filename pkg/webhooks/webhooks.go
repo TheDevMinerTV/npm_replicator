@@ -20,7 +20,7 @@ import (
 var Endpoints = xsync.NewMapOf[string, map[string]bool]()
 
 var WebhookListenerEndpoints = []string{
-	// "https://svelte-changelog.dev/api/webhooks/packages",
+	"https://svelte-changelog.dev/api/webhooks/packages",
 }
 
 var (
