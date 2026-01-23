@@ -25,6 +25,7 @@ services:
       - --couchdb-password=<COUCHDB_PASSWORD>
       - --couchdb-database=registry
       - --log-level=info
+      - --webhooks-enabled
 
 networks:
   web_default:

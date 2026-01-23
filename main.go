@@ -23,6 +23,8 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/thedevminertv/npm-replicator/pkg/httpclient"
 	"github.com/thedevminertv/npm-replicator/pkg/npm"
+	"github.com/thedevminertv/npm-replicator/pkg/replicator"
+	"github.com/thedevminertv/npm-replicator/pkg/webhooks"
 )
 
 var (
@@ -95,6 +97,8 @@ var (
 
 	fBatchedMetadataUpdateInterval = flag.Duration("metadata-update-interval", 15*time.Second, "Interval between batched metadata updates")
 	fMetadataUpdateBatchSize       = flag.Int("metadata-update-batch-size", 10, "Batch size for metadata updates")
+
+	fWebhooksEnabled = flag.Bool("webhooks-enabled", false, "Enable webhook notifications for package updates")
 )
 
 func init() {
@@ -132,6 +136,8 @@ func init() {
 		localLastSyncedSequenceID,
 		upstreamDocumentCount,
 		upstreamSequenceID,
+		webhooks.WebhookCallsTotal,
+		webhooks.WebhookRetriesTotal,
 	)
 }
 
@@ -242,7 +248,7 @@ func main() {
 						Str("upstream_rev", upstreamRev).
 						Logger()
 
-					var pkg RegistryPackage
+					var pkg replicator.RegistryPackage
 
 					existingDoc := db.Get(ctx, change.ID)
 					var docExists bool
@@ -302,6 +308,15 @@ func main() {
 						log.Debug().
 							Str("local_rev", localRev).
 							Msg("updated doc in CouchDB")
+
+						if *fWebhooksEnabled {
+							payload, err := json.Marshal(webhooks.NewChangestreamUpdatedData(pkg))
+							if err != nil {
+								log.Error().Err(err).Str("package", change.ID).Msg("Failed to marshal webhook payload")
+							} else {
+								webhooks.CallWebhooksAsync(ctx, change.ID, payload)
+							}
+						}
 					}
 
 					tracker.NewLastSeenSeq(change.Seq)
@@ -351,7 +366,7 @@ func main() {
 						continue
 					}
 
-					var pkg RegistryPackage
+					var pkg replicator.RegistryPackage
 					if err := statusView.ScanDoc(&pkg); err != nil {
 						log.Error().Err(err).Msg("failed to read replicator document")
 						continue
@@ -368,8 +383,8 @@ func main() {
 						if err != nil {
 							log.Error().Err(err).Msg("Could not fetch package metadata")
 
-							var httpErr httpclient.UnexpectedHttpStatusError
-							if errors.As(err, &httpErr) && httpErr.StatusCode() == http.StatusNotFound {
+							var httpErr httpclient.UnexpectedHTTPStatusCodeError
+							if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
 								log.Error().Msg("Package not found in upstream registry, marking as bad document")
 
 								pkg.Replicator.FoundInChangestreamButNotInRegistry = true
@@ -424,13 +439,13 @@ func main() {
 							}
 
 							// generate new package document so that we don't have stale information in there
-							pkg = RegistryPackage{
+							pkg = replicator.RegistryPackage{
 								Version: version,
 								Rev_:    pkg.Rev_,
-								Replicator: ReplicatorMetadata{
+								Replicator: replicator.ReplicatorMetadata{
 									UpstreamRev: pkg.Replicator.UpstreamRev,
 									// mark the metadata as updated
-									MetadataRev: &pkg.Replicator.UpstreamRev,
+									MetadataRev:   &pkg.Replicator.UpstreamRev,
 									HasInvalidTag: hasInvalidTag,
 								},
 							}
@@ -445,6 +460,15 @@ func main() {
 							log.Debug().
 								Str("new_rev", newRev).
 								Msg("refreshed metadata for package")
+
+							if *fWebhooksEnabled {
+								payload, err := json.Marshal(webhooks.NewMetadataUpdatedData(pkg))
+								if err != nil {
+									log.Error().Err(err).Str("package", packageID).Msg("Failed to marshal webhook payload")
+								} else {
+									webhooks.CallWebhooksAsync(ctx, packageID, payload)
+								}
+							}
 						}
 					})
 
@@ -544,22 +568,4 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 		localDocumentCount.With(prometheus.Labels{"status": "up-to-date"}).Set(float64(upToDate))
 		localDocumentCount.With(prometheus.Labels{"status": "faulty"}).Set(float64(faulty))
 	}
-}
-
-type ReplicatorMetadata struct {
-	UpstreamRev          string     `json:"upstreamRev"`
-	MetadataRev          *string    `json:"metadataRev"`
-	DownloadsLastUpdated *time.Time `json:"downloadsLastUpdated"`
-
-	FoundInChangestreamButNotInRegistry bool `json:"foundInChangestreamButNotInRegistry"`
-	HasJSONParseError                   bool `json:"hasJSONParseError"`
-	HasInvalidTag                       bool `json:"hasInvalidTag"`
-}
-
-type RegistryPackage struct {
-	npm.Version
-
-	Rev_ *string `json:"_rev,omitempty"`
-
-	Replicator ReplicatorMetadata `json:"replicator"`
 }

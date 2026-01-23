@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/rs/zerolog/log"
+	"github.com/thedevminertv/npm-replicator/pkg/httpclient"
 )
 
 type InfoResponse struct {
@@ -15,12 +16,11 @@ type InfoResponse struct {
 }
 
 func (c *Client) Info(ctx context.Context) (*InfoResponse, error) {
-	body, err := c.replicateClient.GetJSON(ctx, "/", nil, nil)
+	body, err := c.replicateClient.GetJSON(ctx, "/", nil, nil, httpclient.ExactStatusCode(200))
 	if err != nil {
 		log.Error().Err(err).Msg("failed to fetch registry info")
 		return nil, err
 	}
-	defer body.Close()
 
 	var response InfoResponse
 	if err := json.NewDecoder(body).Decode(&response); err != nil {
@@ -56,12 +56,11 @@ func (c *Client) Changes(ctx context.Context, startSeq int64, limit int) (*Chang
 
 	log.Info().Int64("start_sequence_id", startSeq).Msg("Fetching changes for range")
 
-	body, err := c.replicateClient.GetJSON(ctx, "/_changes", q, nil)
+	body, err := c.replicateClient.GetJSON(ctx, "/_changes", q, nil, httpclient.ExactStatusCode(200))
 	if err != nil {
 		log.Error().Err(err).Msg("failed to fetch registry changes")
 		return nil, err
 	}
-	defer body.Close()
 
 	var response ChangesResponse
 	if err := json.NewDecoder(body).Decode(&response); err != nil {

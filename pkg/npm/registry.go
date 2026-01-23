@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+
+	"github.com/thedevminertv/npm-replicator/pkg/httpclient"
 )
 
 type PackageMetadata struct {
@@ -23,11 +25,10 @@ type PackageMetadata struct {
 func (c *Client) PackageMetadata(ctx context.Context, name string) (*PackageMetadata, error) {
 	escapedPackageName := url.PathEscape(name)
 
-	body, err := c.registryClient.GetJSON(ctx, fmt.Sprintf("/%s", escapedPackageName), nil, nil)
+	body, err := c.registryClient.GetJSON(ctx, fmt.Sprintf("/%s", escapedPackageName), nil, nil, httpclient.ExactStatusCode(200))
 	if err != nil {
 		return nil, err
 	}
-	defer body.Close()
 
 	metadata := &PackageMetadata{}
 	if err := json.NewDecoder(body).Decode(metadata); err != nil {
