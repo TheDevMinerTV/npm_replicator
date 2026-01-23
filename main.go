@@ -584,13 +584,16 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 			}
 
 			var output *int
-			if key == "out-of-date" {
+			switch key {
+			case "out-of-date":
 				output = &outOfDate
-			} else if key == "up-to-date" {
+			case "up-to-date":
 				output = &upToDate
-			} else if key == "faulty" {
+			case "faulty":
 				output = &faulty
-			} else {
+			case "is-fixable-with-time":
+				output = &faulty
+			default:
 				log.Warn().Str("key", key).Msg("unknown key")
 				continue
 			}
