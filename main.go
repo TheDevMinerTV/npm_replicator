@@ -138,6 +138,8 @@ func init() {
 		upstreamSequenceID,
 		webhooks.WebhookCallsTotal,
 		webhooks.WebhookRetriesTotal,
+		webhooks.WebhookEndpointRetriesTotal,
+		webhooks.WebhookSubscribedPackages,
 	)
 }
 

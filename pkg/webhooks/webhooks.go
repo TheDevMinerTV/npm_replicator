@@ -51,6 +51,15 @@ var (
 		},
 		[]string{"endpoint"},
 	)
+	WebhookSubscribedPackages = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "webhooks",
+			Name:      "subscribed_packages",
+			Help:      "Number of packages subscribed per endpoint",
+		},
+		[]string{"endpoint"},
+	)
 )
 
 const (
@@ -179,4 +188,5 @@ func updateEndpointListeners(ctx context.Context, endpoint string) {
 		packagesMap[pkg] = true
 	}
 	Endpoints.Store(endpoint, packagesMap)
+	WebhookSubscribedPackages.WithLabelValues(endpoint).Set(float64(len(newPackages)))
 }
