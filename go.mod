@@ -5,6 +5,7 @@ go 1.25.3
 require (
 	github.com/go-kivik/kivik/v4 v4.5.0
 	github.com/prometheus/client_golang v1.23.2
+	github.com/puzpuzpuz/xsync/v3 v3.5.1
 	github.com/rs/zerolog v1.34.0
 )
 

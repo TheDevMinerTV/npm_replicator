@@ -189,6 +189,21 @@ func main() {
 
 	var wg sync.WaitGroup
 
+	if *fWebhooksEnabled {
+		webhooks.RefreshWebhookListeners(ctx)
+		wg.Go(func() {
+			ticker := time.Tick(1 * time.Hour)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker:
+					webhooks.RefreshWebhookListeners(ctx)
+				}
+			}
+		})
+	}
+
 	wg.Go(func() {
 		ticker := time.Tick(*fStatsUpdateInterval)
 		log.Info().
