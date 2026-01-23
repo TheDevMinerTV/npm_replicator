@@ -117,10 +117,7 @@ func init() {
 
 	authMap := make(map[string]string)
 	for _, auth := range fWebhookAuthorizations {
-		parts := strings.Split(auth, "=")
-		if len(parts) != 2 {
-			log.Fatal().Str("auth", auth).Msg("Invalid webhook authorization format, expected url=token")
-		}
+		parts := strings.SplitN(auth, "=", 2)
 		url := strings.TrimSpace(parts[0])
 		token := strings.TrimSpace(parts[1])
 		if url == "" || token == "" {
