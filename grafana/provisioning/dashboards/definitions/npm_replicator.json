@@ -699,6 +699,19 @@
             "type": "prometheus",
             "uid": "default_prometheus_ds"
           },
+          "editorMode": "builder",
+          "expr": "npm_replicator_events_document_count{status=\"is-fixable-with-time\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Fixable with time",
+          "range": true,
+          "refId": "Fixable with time"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "default_prometheus_ds"
+          },
           "disableTextWrap": false,
           "editorMode": "builder",
           "expr": "npm_replicator_events_document_count{status=\"up-to-date\"}",
