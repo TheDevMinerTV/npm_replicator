@@ -161,8 +161,8 @@ type Version struct {
 	Repository   *Repository `json:"repository,omitempty"`
 	Version      string      `json:"version"`
 	Author       *User       `json:"author,omitempty"`
-	Maintainers  []User      `json:"maintainers,omitempty"`
-	Contributors []User      `json:"contributors,omitempty"`
+	Maintainers  Users       `json:"maintainers,omitempty"`
+	Contributors Users       `json:"contributors,omitempty"`
 	Dist         struct {
 		Tarball      string `json:"tarball"`
 		FileCount    *int   `json:"fileCount,omitempty"`
