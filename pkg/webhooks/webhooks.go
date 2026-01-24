@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/puzpuzpuz/xsync/v3"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/thedevminertv/npm-replicator/pkg/httpclient"
 	"github.com/thedevminertv/npm-replicator/pkg/retry"
@@ -64,8 +64,8 @@ var (
 )
 
 const (
-	DefaultMaxRetries = 3
-	DefaultBaseDelay  = 1 * time.Second
+	DefaultMaxRetries = 5
+	DefaultBaseDelay  = 5 * time.Second
 )
 
 func CallWebhooksAsync(ctx context.Context, packageName string, payload []byte) {
@@ -94,7 +94,19 @@ func callWebhookWithRetry(ctx context.Context, client *httpclient.Client, url st
 	log := log.With().Str("webhook_url", url).Str("package", packageName).Logger()
 
 	operation := func() error {
-		return callWebhookOnce(ctx, client, url, payload, log)
+		headers := http.Header{"Content-Type": []string{"application/json"}}
+		if token, ok := WebhookAuthorizations[url]; ok {
+			log.Debug().Msg("Adding authorization header to webhook request")
+			headers["Authorization"] = []string{"Bearer " + token}
+		}
+		_, err := client.Post(ctx, url, nil, headers, bytes.NewReader(payload), httpclient.AllSuccessful)
+		if err != nil {
+			var httpErr httpclient.UnexpectedHTTPStatusCodeError
+			if ok := errors.As(err, &httpErr); ok && httpclient.AllClientErrors(httpErr.StatusCode) {
+				return &retry.NonRetryableError{Err: err}
+			}
+		}
+		return err
 	}
 
 	onRetry := func(attempt int) {
@@ -112,16 +124,6 @@ func callWebhookWithRetry(ctx context.Context, client *httpclient.Client, url st
 	WebhookCallsTotal.WithLabelValues("success", url).Inc()
 }
 
-func callWebhookOnce(ctx context.Context, client *httpclient.Client, url string, payload []byte, log zerolog.Logger) error {
-	headers := http.Header{"Content-Type": []string{"application/json"}}
-	if token, ok := WebhookAuthorizations[url]; ok {
-		log.Debug().Msg("Adding authorization header to webhook request")
-		headers["Authorization"] = []string{"Bearer " + token}
-	}
-	_, err := client.Post(ctx, url, nil, headers, bytes.NewReader(payload), func(code int) bool { return code >= 200 && code < 300 })
-	return err
-}
-
 func RefreshWebhookListeners(ctx context.Context) {
 	for _, endpoint := range WebhookListenerEndpoints {
 		updateEndpointListeners(ctx, endpoint)
@@ -137,8 +139,12 @@ func updateEndpointListeners(ctx context.Context, endpoint string) {
 	var newPackages []string
 
 	operation := func() error {
-		resp, err := client.GetJSON(ctx, endpoint, nil, nil, func(code int) bool { return code == 200 })
+		resp, err := client.GetJSON(ctx, endpoint, nil, nil, httpclient.ExactStatusCode(200))
 		if err != nil {
+			var httpErr httpclient.UnexpectedHTTPStatusCodeError
+			if ok := errors.As(err, &httpErr); ok && httpclient.AllClientErrors(httpErr.StatusCode) {
+				return &retry.NonRetryableError{Err: err}
+			}
 			return err
 		}
 

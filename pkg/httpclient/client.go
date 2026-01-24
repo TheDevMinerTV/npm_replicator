@@ -22,6 +22,18 @@ func ExactStatusCode(expected int) StatusCodeCheckFn {
 	}
 }
 
+var AllSuccessful StatusCodeCheckFn = func(code int) bool {
+	return code >= 200 && code < 400
+}
+
+var AllClientErrors StatusCodeCheckFn = func(code int) bool {
+	return code >= 400 && code < 500
+}
+
+var AllServerErrors StatusCodeCheckFn = func(code int) bool {
+	return code >= 500 && code < 600
+}
+
 type ClientOpt func(*Client)
 
 func WithCustomClient(client *http.Client) ClientOpt {

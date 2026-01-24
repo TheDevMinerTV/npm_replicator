@@ -2,12 +2,26 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
 
 	"github.com/rs/zerolog"
 )
+
+// NonRetryableError wraps an error to indicate it should not be retried
+type NonRetryableError struct {
+	Err error
+}
+
+func (e *NonRetryableError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *NonRetryableError) Unwrap() error {
+	return e.Err
+}
 
 func ExponentialBackoff(ctx context.Context, maxRetries int, baseDelay time.Duration, operation func() error, logger zerolog.Logger, onRetry func(attempt int)) error {
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -30,6 +44,13 @@ func ExponentialBackoff(ctx context.Context, maxRetries int, baseDelay time.Dura
 		err := operation()
 		if err == nil {
 			return nil
+		}
+
+		// Check if error is non-retryable
+		var nonRetryable *NonRetryableError
+		if errors.As(err, &nonRetryable) {
+			logger.Warn().Err(err).Msg("Operation failed with non-retryable error")
+			return err
 		}
 
 		logger.Warn().Err(err).Int("attempt", attempt+1).Msg("Operation failed")
