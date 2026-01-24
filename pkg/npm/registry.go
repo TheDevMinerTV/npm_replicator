@@ -11,15 +11,15 @@ import (
 )
 
 type PackageMetadata struct {
-	Name         string             `json:"name"`
-	Keywords     []string           `json:"keywords,omitempty"`
-	Repository   *Repository        `json:"repository,omitempty"`
-	Author       *User              `json:"author,omitempty"`
-	Maintainers  Users              `json:"maintainers,omitempty"`
-	Contributors Users              `json:"contributors,omitempty"`
-	DistTags     map[string]string  `json:"dist-tags"`
-	Versions     map[string]Version `json:"versions"`
-	Time         map[string]string  `json:"time"`
+	Name         string               `json:"name"`
+	Keywords     []string             `json:"keywords,omitempty"`
+	Repository   *Repository          `json:"repository,omitempty"`
+	Author       *User                `json:"author,omitempty"`
+	Maintainers  Users                `json:"maintainers,omitempty"`
+	Contributors Users                `json:"contributors,omitempty"`
+	DistTags     map[string]string    `json:"dist-tags"`
+	Versions     map[string]Version   `json:"versions"`
+	Time         map[string]TimeEntry `json:"time"`
 }
 
 func (c *Client) PackageMetadata(ctx context.Context, name string) (*PackageMetadata, error) {
@@ -239,4 +239,36 @@ func (e *Engines) UnmarshalJSON(data []byte) error {
 	*e = t
 
 	return nil
+}
+
+type TimeEntry struct {
+	Time     string   `json:"time,omitempty"`
+	Versions []string `json:"versions,omitempty"`
+}
+
+func (t *TimeEntry) UnmarshalJSON(data []byte) error {
+	// First try to unmarshal as string
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		t.Time = s
+		return nil
+	}
+
+	// If not string, try as object
+	var obj struct {
+		Time     string   `json:"time"`
+		Versions []string `json:"versions"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+
+	t.Time = obj.Time
+	t.Versions = obj.Versions
+
+	return nil
+}
+
+func (t *TimeEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t.Time)
 }

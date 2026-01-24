@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"math/rand"
 	"net/http"
 	"time"
 
@@ -14,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/thedevminertv/npm-replicator/pkg/httpclient"
+	"github.com/thedevminertv/npm-replicator/pkg/retry"
 )
 
 // webhook URL <-> package names
@@ -102,7 +101,7 @@ func callWebhookWithRetry(ctx context.Context, client *httpclient.Client, url st
 		WebhookRetriesTotal.WithLabelValues(url).Inc()
 	}
 
-	err := retryWithExponentialBackoff(ctx, DefaultMaxRetries, DefaultBaseDelay, operation, log, onRetry)
+	err := retry.ExponentialBackoff(ctx, DefaultMaxRetries, DefaultBaseDelay, operation, log, onRetry)
 	if err != nil {
 		log.Error().Err(err).Msg("Webhook call failed after all retries")
 		WebhookCallsTotal.WithLabelValues("failure", url).Inc()
@@ -121,36 +120,6 @@ func callWebhookOnce(ctx context.Context, client *httpclient.Client, url string,
 	}
 	_, err := client.Post(ctx, url, nil, headers, bytes.NewReader(payload), func(code int) bool { return code >= 200 && code < 300 })
 	return err
-}
-
-func retryWithExponentialBackoff(ctx context.Context, maxRetries int, baseDelay time.Duration, operation func() error, logger zerolog.Logger, onRetry func(attempt int)) error {
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 {
-			// Calculate exponential backoff with jitter
-			delay := baseDelay * time.Duration(1<<uint(attempt-1))                // 2^(attempt-1)
-			jitter := time.Duration(float64(delay) * (0.75 + rand.Float64()*0.5)) // ±25% jitter
-
-			logger.Debug().Int("attempt", attempt).Dur("delay", jitter).Msg("Retrying after delay")
-			select {
-			case <-ctx.Done():
-				logger.Warn().Msg("Operation canceled due to context done")
-				return ctx.Err()
-			case <-time.After(jitter):
-			}
-			if onRetry != nil {
-				onRetry(attempt)
-			}
-		}
-
-		err := operation()
-		if err == nil {
-			return nil
-		}
-
-		logger.Warn().Err(err).Int("attempt", attempt+1).Msg("Operation failed")
-	}
-
-	return fmt.Errorf("operation failed after %d retries", maxRetries)
 }
 
 func RefreshWebhookListeners(ctx context.Context) {
@@ -180,7 +149,7 @@ func updateEndpointListeners(ctx context.Context, endpoint string) {
 		WebhookEndpointRetriesTotal.WithLabelValues(endpoint).Inc()
 	}
 
-	err := retryWithExponentialBackoff(ctx, DefaultMaxRetries, DefaultBaseDelay, operation, logger, onRetry)
+	err := retry.ExponentialBackoff(ctx, DefaultMaxRetries, DefaultBaseDelay, operation, logger, onRetry)
 	if err != nil {
 		logger.Error().Err(err).Msg("Failed to fetch packages from endpoint after all retries")
 		logger.Warn().Msg("Keeping previous packages for endpoint due to fetch failure")
