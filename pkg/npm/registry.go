@@ -14,7 +14,7 @@ type PackageMetadata struct {
 	Name         string               `json:"name"`
 	Keywords     Keywords             `json:"keywords,omitempty"`
 	Repository   *Repository          `json:"repository,omitempty"`
-	Author       *User                `json:"author,omitempty"`
+	Author       Users                `json:"author,omitempty"`
 	Maintainers  Users                `json:"maintainers,omitempty"`
 	Contributors Users                `json:"contributors,omitempty"`
 	DistTags     map[string]string    `json:"dist-tags"`
@@ -132,6 +132,20 @@ func (u Users) Len() int { return len(u) }
 
 func (u *Users) UnmarshalJSON(data []byte) error {
 	{
+		// try decoding as single user
+		var t User
+		if err := json.Unmarshal(data, &t); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			*u = Users{t}
+			return nil
+		}
+	}
+
+	{
 		// try decoding as string
 		var t string
 		if err := json.Unmarshal(data, &t); err != nil {
@@ -160,7 +174,7 @@ type Version struct {
 	Keywords     Keywords    `json:"keywords,omitempty"`
 	Repository   *Repository `json:"repository,omitempty"`
 	Version      string      `json:"version"`
-	Author       *User       `json:"author,omitempty"`
+	Author       Users       `json:"author,omitempty"`
 	Maintainers  Users       `json:"maintainers,omitempty"`
 	Contributors Users       `json:"contributors,omitempty"`
 	Dist         struct {
