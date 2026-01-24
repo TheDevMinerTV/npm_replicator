@@ -12,7 +12,7 @@ import (
 
 type PackageMetadata struct {
 	Name         string               `json:"name"`
-	Keywords     []string             `json:"keywords,omitempty"`
+	Keywords     Keywords             `json:"keywords,omitempty"`
 	Repository   *Repository          `json:"repository,omitempty"`
 	Author       *User                `json:"author,omitempty"`
 	Maintainers  Users                `json:"maintainers,omitempty"`
@@ -157,7 +157,7 @@ func (u *Users) UnmarshalJSON(data []byte) error {
 
 type Version struct {
 	Name         string      `json:"name"`
-	Keywords     []string    `json:"keywords,omitempty"`
+	Keywords     Keywords    `json:"keywords,omitempty"`
 	Repository   *Repository `json:"repository,omitempty"`
 	Version      string      `json:"version"`
 	Author       *User       `json:"author,omitempty"`
@@ -271,4 +271,33 @@ func (t *TimeEntry) UnmarshalJSON(data []byte) error {
 
 func (t *TimeEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.Time)
+}
+
+type Keywords []string
+
+func (k Keywords) Len() int { return len(k) }
+
+func (k *Keywords) UnmarshalJSON(data []byte) error {
+	{
+		// try decoding as string
+		var w string
+		if err := json.Unmarshal(data, &w); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			*k = Keywords{w}
+			return nil
+		}
+	}
+
+	var w []string
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+
+	*k = w
+
+	return nil
 }
