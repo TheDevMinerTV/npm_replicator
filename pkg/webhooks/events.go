@@ -14,16 +14,20 @@ func (t timestamp) MarshalJSON() ([]byte, error) {
 }
 
 type MetadataUpdatedData struct {
-	Event     string                     `json:"event"`
-	Timestamp timestamp                  `json:"timestamp"`
-	Package   replicator.RegistryPackage `json:"package"`
+	Event           string                     `json:"event"`
+	Timestamp       timestamp                  `json:"timestamp"`
+	Package         replicator.RegistryPackage `json:"package"`
+	Dependents      []DependentInfo            `json:"dependents,omitempty"`
+	TotalDependents int                        `json:"totalDependents,omitempty"`
 }
 
-func NewMetadataUpdatedData(pkg replicator.RegistryPackage) MetadataUpdatedData {
+func NewMetadataUpdatedData(pkg replicator.RegistryPackage, dependents []DependentInfo, totalDependents int) MetadataUpdatedData {
 	return MetadataUpdatedData{
-		Event:     "metadata_updated",
-		Timestamp: timestamp(time.Now()),
-		Package:   pkg,
+		Event:           "metadata_updated",
+		Timestamp:       timestamp(time.Now()),
+		Package:         pkg,
+		Dependents:      dependents,
+		TotalDependents: totalDependents,
 	}
 }
 
@@ -39,4 +43,11 @@ func NewChangestreamUpdatedData(pkg replicator.RegistryPackage) ChangestreamUpda
 		Timestamp: timestamp(time.Now()),
 		Package:   pkg,
 	}
+}
+
+// DependentInfo contains information about a package that depends on another.
+type DependentInfo struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description,omitempty"`
 }

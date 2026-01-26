@@ -106,6 +106,10 @@ var (
 
 	fWebhooksEnabled = flag.Bool("webhooks-enabled", false, "Enable webhook notifications for package updates")
 
+	fDependentsFetchEnabled    = flag.Bool("dependents-fetch-enabled", true, "Enable fetching dependents during metadata updates")
+	fDependentsFetchMaxResults = flag.Int("dependents-fetch-max-results", 100, "Maximum number of dependents to fetch per package")
+	fDependentsStaleDays       = flag.Int("dependents-stale-days", 7, "Number of days before dependents data is considered stale")
+
 	fWebhookAuthorizations stringSlice
 )
 
@@ -480,14 +484,53 @@ func main() {
 							}
 
 							// generate new package document so that we don't have stale information in there
+							now := time.Now()
+
+							// Check if dependents are stale and should be fetched
+							var dependents []webhooks.DependentInfo
+							var totalDependents int
+							var dependentsFetched bool
+
+							if *fDependentsFetchEnabled {
+								isDependentsStale := pkg.Replicator.DependentsLastUpdated == nil ||
+									time.Since(*pkg.Replicator.DependentsLastUpdated) > time.Duration(*fDependentsStaleDays)*24*time.Hour
+
+								if isDependentsStale {
+									log.Trace().Msg("Fetching dependents from local DB...")
+									fetchedDependents, total, err := fetchDependentsFromDB(ctx, db, packageID, *fDependentsFetchMaxResults)
+									if err != nil {
+										log.Warn().Err(err).Msg("Failed to fetch dependents from local DB, continuing without them")
+									} else {
+										dependentsFetched = true
+										totalDependents = total
+										dependents = fetchedDependents
+										log.Debug().
+											Int("count", len(dependents)).
+											Int("total", totalDependents).
+											Msg("Fetched dependents from local DB")
+									}
+								}
+							}
+
+							// Set DependentsLastUpdated if we fetched dependents
+							var dependentsLastUpdated *time.Time
+							if dependentsFetched {
+								dependentsLastUpdated = &now
+							} else {
+								// Preserve existing timestamp if we didn't fetch
+								dependentsLastUpdated = pkg.Replicator.DependentsLastUpdated
+							}
+
 							pkg = replicator.RegistryPackage{
 								Version: version,
 								Rev_:    pkg.Rev_,
 								Replicator: replicator.ReplicatorMetadata{
 									UpstreamRev: pkg.Replicator.UpstreamRev,
 									// mark the metadata as updated
-									MetadataRev:   &pkg.Replicator.UpstreamRev,
-									HasInvalidTag: hasInvalidTag,
+									MetadataRev:           &pkg.Replicator.UpstreamRev,
+									LastReplicatedAt:      &now,
+									DependentsLastUpdated: dependentsLastUpdated,
+									HasInvalidTag:         hasInvalidTag,
 								},
 							}
 
@@ -503,7 +546,7 @@ func main() {
 								Msg("refreshed metadata for package")
 
 							if *fWebhooksEnabled {
-								payload, err := json.Marshal(webhooks.NewMetadataUpdatedData(pkg))
+								payload, err := json.Marshal(webhooks.NewMetadataUpdatedData(pkg, dependents, totalDependents))
 								if err != nil {
 									log.Error().Err(err).Str("package", packageID).Msg("Failed to marshal webhook payload")
 								} else {
@@ -545,6 +588,52 @@ func main() {
 
 var _upstreamSequenceID int64 = 0
 
+// fetchDependentsFromDB queries the CouchDB for packages that depend on the given package
+func fetchDependentsFromDB(ctx context.Context, db *kivik.DB, packageName string, maxResults int) ([]webhooks.DependentInfo, int, error) {
+	// First get the total count using the reduce view
+	countView := db.Query(ctx, "_design/npm_replication", "dependents_count",
+		kivik.Param("key", packageName),
+		kivik.Param("group", "true"),
+	)
+	if err := countView.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	var totalCount int
+	if countView.Next() {
+		if err := countView.ScanValue(&totalCount); err != nil {
+			countView.Close()
+			return nil, 0, err
+		}
+	}
+	countView.Close()
+
+	// Now get the actual dependents (limited)
+	dependentsView := db.Query(ctx, "_design/npm_replication", "dependents",
+		kivik.Param("key", packageName),
+		kivik.Param("limit", maxResults),
+	)
+	if err := dependentsView.Err(); err != nil {
+		return nil, 0, err
+	}
+	defer dependentsView.Close()
+
+	var dependents []webhooks.DependentInfo
+	for dependentsView.Next() {
+		var dep webhooks.DependentInfo
+		if err := dependentsView.ScanValue(&dep); err != nil {
+			return nil, 0, err
+		}
+		dependents = append(dependents, dep)
+	}
+
+	if err := dependentsView.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	return dependents, totalCount, nil
+}
+
 func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 	info, err := npmClient.Info(ctx)
 	if err != nil {
@@ -576,6 +665,7 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 		upToDate := 0
 		faulty := 0
 		isFixableWithTime := 0
+		stale := 0
 
 		for statusView.Next() {
 			var key string
@@ -594,6 +684,8 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 				output = &faulty
 			case "is-fixable-with-time":
 				output = &isFixableWithTime
+			case "stale":
+				output = &stale
 			default:
 				log.Warn().Str("key", key).Msg("unknown key")
 				continue
@@ -613,5 +705,6 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 		localDocumentCount.With(prometheus.Labels{"status": "up-to-date"}).Set(float64(upToDate))
 		localDocumentCount.With(prometheus.Labels{"status": "faulty"}).Set(float64(faulty))
 		localDocumentCount.With(prometheus.Labels{"status": "is-fixable-with-time"}).Set(float64(isFixableWithTime))
+		localDocumentCount.With(prometheus.Labels{"status": "stale"}).Set(float64(stale))
 	}
 }
