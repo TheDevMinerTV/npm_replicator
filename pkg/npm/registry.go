@@ -171,6 +171,7 @@ func (u *Users) UnmarshalJSON(data []byte) error {
 
 type Version struct {
 	Name         string      `json:"name"`
+	Description  string      `json:"description"`
 	Keywords     Keywords    `json:"keywords,omitempty"`
 	Repository   *Repository `json:"repository,omitempty"`
 	Version      string      `json:"version"`
