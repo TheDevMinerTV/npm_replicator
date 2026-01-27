@@ -7,9 +7,11 @@ import (
 )
 
 type ReplicatorMetadata struct {
-	UpstreamRev          string     `json:"upstreamRev"`
-	MetadataRev          *string    `json:"metadataRev"`
-	DownloadsLastUpdated *time.Time `json:"downloadsLastUpdated"`
+	UpstreamRev             string     `json:"upstreamRev"`
+	MetadataRev             *string    `json:"metadataRev"`
+	DownloadsLastUpdated    *time.Time `json:"downloadsLastUpdated,omitempty"`
+	DependentsLastUpdated   *time.Time `json:"dependentsLastUpdated,omitempty"`
+	LastReplicatedAt        *time.Time `json:"lastReplicatedAt,omitempty"`
 
 	FoundInChangestreamButNotInRegistry bool `json:"foundInChangestreamButNotInRegistry"`
 	HasJSONParseError                   bool `json:"hasJSONParseError"`
