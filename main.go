@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -25,6 +28,7 @@ import (
 	"github.com/thedevminertv/npm-replicator/pkg/httpclient"
 	"github.com/thedevminertv/npm-replicator/pkg/npm"
 	"github.com/thedevminertv/npm-replicator/pkg/replicator"
+	xproxy "golang.org/x/net/proxy"
 	"github.com/thedevminertv/npm-replicator/pkg/webhooks"
 )
 
@@ -143,6 +147,7 @@ var (
 	fDownloadsUpdateInterval  = flag.Duration("downloads-update-interval", 60*time.Second, "Interval between download count update batches")
 	fDownloadsUpdateBatchSize = flag.Int("downloads-update-batch-size", 10, "Batch size for download count updates")
 	fDownloadsStaleness       = flag.Duration("downloads-staleness", 7*24*time.Hour, "How old download counts can be before re-fetching")
+	fDownloadsProxyFile       = flag.String("downloads-proxy-file", "", "Path to file with proxy URLs (one per line) for the downloads client")
 
 	fWebhooksEnabled = flag.Bool("webhooks-enabled", false, "Enable webhook notifications for package updates")
 
@@ -215,7 +220,23 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	npmClient := npm.New()
+	var npmOpts []npm.ClientOpt
+	if *fDownloadsProxyFile != "" {
+		proxies, err := loadProxies(*fDownloadsProxyFile)
+		if err != nil {
+			log.Fatal().Err(err).Str("file", *fDownloadsProxyFile).Msg("Failed to load proxy list")
+		}
+		log.Info().Int("count", len(proxies)).Msg("Loaded download proxies")
+
+		transports, err := buildProxyTransports(proxies)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to build proxy transports")
+		}
+		npmOpts = append(npmOpts, npm.WithDownloadsHTTPClient(&http.Client{
+			Transport: &roundRobinTransport{transports: transports},
+		}))
+	}
+	npmClient := npm.New(npmOpts...)
 
 	couchdbURL, err := url.Parse(*fCouchDBURL)
 	if err != nil {
@@ -812,4 +833,80 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 		downloadsDocumentCount.With(prometheus.Labels{"status": "up-to-date"}).Set(float64(dlUpToDate))
 		downloadsDocumentCount.With(prometheus.Labels{"status": "stale"}).Set(float64(stale))
 	}
+}
+
+func loadProxies(path string) ([]*url.URL, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var proxies []*url.URL
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		u, err := url.Parse(line)
+		if err != nil {
+			return nil, fmt.Errorf("invalid proxy URL %q: %w", line, err)
+		}
+		proxies = append(proxies, u)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(proxies) == 0 {
+		return nil, fmt.Errorf("no proxies found in %s", path)
+	}
+
+	return proxies, nil
+}
+
+type roundRobinTransport struct {
+	transports []http.RoundTripper
+	idx        atomic.Uint64
+}
+
+func (rr *roundRobinTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	i := rr.idx.Add(1) - 1
+	return rr.transports[i%uint64(len(rr.transports))].RoundTrip(req)
+}
+
+func buildProxyTransports(proxies []*url.URL) ([]http.RoundTripper, error) {
+	transports := make([]http.RoundTripper, 0, len(proxies))
+
+	for _, p := range proxies {
+		switch p.Scheme {
+		case "socks5":
+			var auth *xproxy.Auth
+			if p.User != nil {
+				password, _ := p.User.Password()
+				auth = &xproxy.Auth{
+					User:     p.User.Username(),
+					Password: password,
+				}
+			}
+			d, err := xproxy.SOCKS5("tcp", p.Host, auth, xproxy.Direct)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create SOCKS5 dialer for %s: %w", p.Host, err)
+			}
+			transports = append(transports, &http.Transport{
+				DialContext: d.(xproxy.ContextDialer).DialContext,
+			})
+
+		case "http", "https":
+			proxyURL := *p // copy so the closure is safe
+			transports = append(transports, &http.Transport{
+				Proxy: http.ProxyURL(&proxyURL),
+			})
+
+		default:
+			return nil, fmt.Errorf("unsupported proxy scheme %q in %s", p.Scheme, p.String())
+		}
+	}
+
+	return transports, nil
 }
