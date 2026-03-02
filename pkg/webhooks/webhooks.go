@@ -81,7 +81,7 @@ func CallWebhooksAsync(ctx context.Context, packageName string, payload []byte) 
 		return
 	}
 
-	log.Info().Str("package", packageName).Int("webhook_count", len(webhookURLs)).Msg("Sending webhook notifications")
+	log.Debug().Str("package", packageName).Int("webhook_count", len(webhookURLs)).Msg("Sending webhook notifications")
 
 	client := httpclient.New("", httpclient.WithCustomClient(&http.Client{Timeout: 30 * time.Second}))
 
@@ -91,7 +91,7 @@ func CallWebhooksAsync(ctx context.Context, packageName string, payload []byte) 
 }
 
 func callWebhookWithRetry(ctx context.Context, client *httpclient.Client, url string, payload []byte, packageName string) {
-	log := log.With().Str("webhook_url", url).Str("package", packageName).Logger()
+	log := log.With().Str("endpoint", url).Str("package", packageName).Logger()
 
 	operation := func() error {
 		headers := http.Header{"Content-Type": []string{"application/json"}}
