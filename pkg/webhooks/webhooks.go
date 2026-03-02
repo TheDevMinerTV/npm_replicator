@@ -83,7 +83,12 @@ func CallWebhooksAsync(ctx context.Context, packageName string, payload []byte) 
 
 	log.Debug().Str("package", packageName).Int("webhook_count", len(webhookURLs)).Msg("Sending webhook notifications")
 
-	client := httpclient.New("", httpclient.WithCustomClient(&http.Client{Timeout: 30 * time.Second}))
+	client := httpclient.New("",
+		httpclient.WithCustomClient(&http.Client{Timeout: 30 * time.Second}),
+		httpclient.WithDefaultHeaders(http.Header{
+			"User-Agent": []string{"npm-replicator (github.com/thedevminertv/npm-replicator)"},
+		}),
+	)
 
 	for _, url := range webhookURLs {
 		go callWebhookWithRetry(ctx, client, url, payload, packageName)
@@ -135,7 +140,12 @@ func updateEndpointListeners(ctx context.Context, endpoint string) {
 
 	_, _ = Endpoints.Load(endpoint)
 
-	client := httpclient.New("", httpclient.WithCustomClient(&http.Client{Timeout: 30 * time.Second}))
+	client := httpclient.New("",
+		httpclient.WithCustomClient(&http.Client{Timeout: 30 * time.Second}),
+		httpclient.WithDefaultHeaders(http.Header{
+			"User-Agent": []string{"npm-replicator (github.com/thedevminertv/npm-replicator)"},
+		}),
+	)
 	var newPackages []string
 
 	operation := func() error {

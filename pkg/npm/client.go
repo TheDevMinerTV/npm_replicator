@@ -1,6 +1,8 @@
 package npm
 
 import (
+	"net/http"
+
 	"github.com/thedevminertv/npm-replicator/pkg/httpclient"
 )
 
@@ -15,10 +17,14 @@ type Client struct {
 	downloadsClient *httpclient.Client
 }
 
+var defaultHeaders = httpclient.WithDefaultHeaders(http.Header{
+	"User-Agent": []string{"npm-replicator (github.com/thedevminertv/npm-replicator)"},
+})
+
 func New() *Client {
 	return &Client{
-		replicateClient: httpclient.New(ReplicateBaseURL),
-		registryClient:  httpclient.New(RegistryBaseURL),
-		downloadsClient: httpclient.New(DownloadsBaseURL),
+		replicateClient: httpclient.New(ReplicateBaseURL, defaultHeaders),
+		registryClient:  httpclient.New(RegistryBaseURL, defaultHeaders),
+		downloadsClient: httpclient.New(DownloadsBaseURL, defaultHeaders),
 	}
 }
