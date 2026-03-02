@@ -123,6 +123,15 @@ var (
 		},
 		[]string{"status"},
 	)
+	downloadsProxyErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "downloads",
+			Name:      "proxy_errors_total",
+			Help:      "Total number of proxy transport errors",
+		},
+		[]string{"proxy"},
+	)
 )
 
 var (
@@ -148,6 +157,7 @@ var (
 	fDownloadsUpdateBatchSize = flag.Int("downloads-update-batch-size", 10, "Batch size for download count updates")
 	fDownloadsStaleness       = flag.Duration("downloads-staleness", 7*24*time.Hour, "How old download counts can be before re-fetching")
 	fDownloadsProxyFile       = flag.String("downloads-proxy-file", "", "Path to file with proxy URLs (one per line) for the downloads client")
+	fDownloadsProxyCooldown   = flag.Duration("downloads-proxy-cooldown", 30*time.Second, "Cooldown duration for downed proxies before retrying")
 
 	fWebhooksEnabled = flag.Bool("webhooks-enabled", false, "Enable webhook notifications for package updates")
 
@@ -213,6 +223,7 @@ func init() {
 		downloadsErrorsTotal,
 		downloadsFetchDuration,
 		downloadsDocumentCount,
+		downloadsProxyErrors,
 	)
 }
 
@@ -228,12 +239,12 @@ func main() {
 		}
 		log.Info().Int("count", len(proxies)).Msg("Loaded download proxies")
 
-		transports, err := buildProxyTransports(proxies)
+		proxyStates, err := buildProxyTransports(proxies)
 		if err != nil {
 			log.Fatal().Err(err).Msg("Failed to build proxy transports")
 		}
 		npmOpts = append(npmOpts, npm.WithDownloadsHTTPClient(&http.Client{
-			Transport: &roundRobinTransport{transports: transports},
+			Transport: &roundRobinTransport{proxies: proxyStates, cooldown: *fDownloadsProxyCooldown},
 		}))
 	}
 	npmClient := npm.New(npmOpts...)
@@ -865,20 +876,52 @@ func loadProxies(path string) ([]*url.URL, error) {
 	return proxies, nil
 }
 
+type proxyState struct {
+	transport http.RoundTripper
+	name      string
+	downUntil atomic.Int64 // unix timestamp; 0 = healthy
+}
+
 type roundRobinTransport struct {
-	transports []http.RoundTripper
-	idx        atomic.Uint64
+	proxies  []*proxyState
+	idx      atomic.Uint64
+	cooldown time.Duration
 }
 
 func (rr *roundRobinTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	i := rr.idx.Add(1) - 1
-	return rr.transports[i%uint64(len(rr.transports))].RoundTrip(req)
+	n := uint64(len(rr.proxies))
+	start := rr.idx.Add(1) - 1
+
+	for offset := uint64(0); offset < n; offset++ {
+		ps := rr.proxies[(start+offset)%n]
+
+		if downUntil := ps.downUntil.Load(); downUntil != 0 {
+			if time.Now().Unix() < downUntil {
+				continue // still in cooldown
+			}
+			ps.downUntil.Store(0) // cooldown expired, mark healthy
+		}
+
+		resp, err := ps.transport.RoundTrip(req)
+		if err != nil {
+			ps.downUntil.Store(time.Now().Add(rr.cooldown).Unix())
+			downloadsProxyErrors.With(prometheus.Labels{"proxy": ps.name}).Inc()
+			log.Warn().Err(err).Str("proxy", ps.name).Dur("cooldown", rr.cooldown).Msg("proxy error, marking down")
+			continue
+		}
+
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("all proxies are down")
 }
 
-func buildProxyTransports(proxies []*url.URL) ([]http.RoundTripper, error) {
-	transports := make([]http.RoundTripper, 0, len(proxies))
+func buildProxyTransports(proxies []*url.URL) ([]*proxyState, error) {
+	states := make([]*proxyState, 0, len(proxies))
 
 	for _, p := range proxies {
+		var transport http.RoundTripper
+
 		switch p.Scheme {
 		case "socks5":
 			var auth *xproxy.Auth
@@ -893,20 +936,25 @@ func buildProxyTransports(proxies []*url.URL) ([]http.RoundTripper, error) {
 			if err != nil {
 				return nil, fmt.Errorf("failed to create SOCKS5 dialer for %s: %w", p.Host, err)
 			}
-			transports = append(transports, &http.Transport{
+			transport = &http.Transport{
 				DialContext: d.(xproxy.ContextDialer).DialContext,
-			})
+			}
 
 		case "http", "https":
 			proxyURL := *p // copy so the closure is safe
-			transports = append(transports, &http.Transport{
+			transport = &http.Transport{
 				Proxy: http.ProxyURL(&proxyURL),
-			})
+			}
 
 		default:
 			return nil, fmt.Errorf("unsupported proxy scheme %q in %s", p.Scheme, p.String())
 		}
+
+		states = append(states, &proxyState{
+			transport: transport,
+			name:      p.String(),
+		})
 	}
 
-	return transports, nil
+	return states, nil
 }
