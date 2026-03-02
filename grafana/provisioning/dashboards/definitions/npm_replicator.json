@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 1,
+  "id": 0,
   "links": [],
   "panels": [
     {
@@ -890,9 +890,9 @@
         "x": 0,
         "y": 23
       },
-      "id": 9,
+      "id": 22,
       "panels": [],
-      "title": "CouchDB",
+      "title": "Downloads",
       "type": "row"
     },
     {
@@ -903,7 +903,41 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "mappings": [],
           "thresholds": {
@@ -914,18 +948,159 @@
                 "value": 0
               }
             ]
-          },
-          "unit": "decbytes"
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
-        "w": 5,
+        "h": 14,
+        "w": 9,
         "x": 0,
         "y": 24
       },
-      "id": 2,
+      "id": 26,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "npm_replicator_downloads_document_count{status=\"up-to-date\"}",
+          "legendFormat": "Up-to-date",
+          "range": true,
+          "refId": "UpToDate"
+        },
+        {
+          "editorMode": "code",
+          "expr": "npm_replicator_downloads_document_count{status=\"stale\"}",
+          "hide": false,
+          "legendFormat": "Stale",
+          "range": true,
+          "refId": "Stale"
+        },
+        {
+          "editorMode": "code",
+          "expr": "npm_replicator_downloads_document_count{status=\"never-fetched\"}",
+          "hide": false,
+          "legendFormat": "Never fetched",
+          "range": true,
+          "refId": "NeverFetched"
+        }
+      ],
+      "title": "Downloads document count",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "default_prometheus_ds"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 5,
+        "x": 9,
+        "y": 24
+      },
+      "id": 24,
+      "interval": "60s",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "irate(npm_replicator_downloads_errors_total[5m])",
+          "legendFormat": "{{reason}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Errors",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "default_prometheus_ds"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "pkgs/min"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 5,
+        "x": 14,
+        "y": 24
+      },
+      "id": 23,
       "interval": "60s",
       "options": {
         "colorMode": "value",
@@ -948,14 +1123,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "exemplar": false,
-          "expr": "npm_replicator_couchdb_size",
+          "expr": "irate(npm_replicator_downloads_updated_total[5m])",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "On-disk size",
+      "title": "Update rate",
       "type": "stat"
     },
     {
@@ -978,17 +1152,87 @@
               }
             ]
           },
-          "unit": "decbytes"
+          "unit": "s"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
+        "h": 7,
         "w": 5,
-        "x": 5,
+        "x": 19,
         "y": 24
       },
-      "id": 10,
+      "id": 27,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "editorMode": "builder",
+          "expr": "sum(npm_replicator_downloads_document_count{status=~\"never-fetched|stale\"}) / (sum(rate(npm_replicator_downloads_updated_total[5m])))",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Estimated Catch-up Time",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "default_prometheus_ds"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "#EAB839",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 5,
+        "x": 19,
+        "y": 31
+      },
+      "id": 25,
       "interval": "60s",
       "options": {
         "colorMode": "value",
@@ -1011,14 +1255,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "exemplar": false,
-          "expr": "npm_replicator_couchdb_active_size",
-          "legendFormat": "__auto",
+          "expr": "histogram_quantile(0.95, rate(npm_replicator_downloads_fetch_duration_seconds_bucket[5m]))",
+          "legendFormat": "p95",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Active size",
+      "title": "Fetch duration (p95)",
       "type": "stat"
     },
     {
@@ -1027,7 +1270,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 29
+        "y": 38
       },
       "id": 19,
       "panels": [],
@@ -1066,7 +1309,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 30
+        "y": 39
       },
       "id": 18,
       "options": {
@@ -1131,7 +1374,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 30
+        "y": 39
       },
       "id": 20,
       "options": {
@@ -1196,7 +1439,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 30
+        "y": 39
       },
       "id": 21,
       "options": {
@@ -1228,6 +1471,145 @@
       ],
       "title": "Delivery successes",
       "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "id": 9,
+      "panels": [],
+      "title": "CouchDB",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "default_prometheus_ds"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "decbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 0,
+        "y": 45
+      },
+      "id": 2,
+      "interval": "60s",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "npm_replicator_couchdb_size",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "On-disk size",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "default_prometheus_ds"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "decbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 5,
+        "y": 45
+      },
+      "id": 10,
+      "interval": "60s",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "npm_replicator_couchdb_active_size",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Active size",
+      "type": "stat"
     }
   ],
   "preload": false,
@@ -1238,12 +1620,12 @@
     "list": []
   },
   "time": {
-    "from": "now-12h",
+    "from": "now-24h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
   "title": "NPM Replicator",
   "uid": "df3ndculyvu2of",
-  "version": 6
+  "version": 7
 }

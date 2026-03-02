@@ -84,6 +84,41 @@ var (
 			Help:      "Last sequence number in upstream",
 		},
 	)
+
+	downloadsUpdatedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "downloads",
+			Name:      "updated_total",
+			Help:      "Total number of packages whose download counts were updated",
+		},
+	)
+	downloadsErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "downloads",
+			Name:      "errors_total",
+			Help:      "Total number of download fetch errors",
+		},
+		[]string{"reason"},
+	)
+	downloadsFetchDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "downloads",
+			Name:      "fetch_duration_seconds",
+			Help:      "Duration of download count fetches",
+		},
+	)
+	downloadsDocumentCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "downloads",
+			Name:      "document_count",
+			Help:      "Number of packages by download status",
+		},
+		[]string{"status"},
+	)
 )
 
 var (
@@ -103,6 +138,11 @@ var (
 
 	fBatchedMetadataUpdateInterval = flag.Duration("metadata-update-interval", 15*time.Second, "Interval between batched metadata updates")
 	fMetadataUpdateBatchSize       = flag.Int("metadata-update-batch-size", 10, "Batch size for metadata updates")
+
+	fDownloadsEnabled         = flag.Bool("downloads-enabled", false, "Enable download count fetching")
+	fDownloadsUpdateInterval  = flag.Duration("downloads-update-interval", 60*time.Second, "Interval between download count update batches")
+	fDownloadsUpdateBatchSize = flag.Int("downloads-update-batch-size", 10, "Batch size for download count updates")
+	fDownloadsStaleness       = flag.Duration("downloads-staleness", 7*24*time.Hour, "How old download counts can be before re-fetching")
 
 	fWebhooksEnabled = flag.Bool("webhooks-enabled", false, "Enable webhook notifications for package updates")
 
@@ -164,6 +204,10 @@ func init() {
 		webhooks.WebhookRetriesTotal,
 		webhooks.WebhookEndpointRetriesTotal,
 		webhooks.WebhookSubscribedPackages,
+		downloadsUpdatedTotal,
+		downloadsErrorsTotal,
+		downloadsFetchDuration,
+		downloadsDocumentCount,
 	)
 }
 
@@ -481,13 +525,14 @@ func main() {
 
 							// generate new package document so that we don't have stale information in there
 							pkg = replicator.RegistryPackage{
-								Version: version,
-								Rev_:    pkg.Rev_,
+								Version:   version,
+								Rev_:      pkg.Rev_,
+								Downloads: pkg.Downloads,
 								Replicator: replicator.ReplicatorMetadata{
-									UpstreamRev: pkg.Replicator.UpstreamRev,
-									// mark the metadata as updated
-									MetadataRev:   &pkg.Replicator.UpstreamRev,
-									HasInvalidTag: hasInvalidTag,
+									UpstreamRev:          pkg.Replicator.UpstreamRev,
+									MetadataRev:          &pkg.Replicator.UpstreamRev,
+									DownloadsLastUpdated: pkg.Replicator.DownloadsLastUpdated,
+									HasInvalidTag:        hasInvalidTag,
 								},
 							}
 
@@ -523,6 +568,113 @@ func main() {
 			}
 		}
 	})
+
+	if *fDownloadsEnabled {
+		wg.Go(func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error().Interface("recovered", r).Msg("recovered from panic in downloads updater")
+				}
+			}()
+
+			ticker := time.Tick(*fDownloadsUpdateInterval)
+			log.Info().
+				Dur("interval", *fDownloadsUpdateInterval).
+				Int("batch_size", *fDownloadsUpdateBatchSize).
+				Dur("staleness", *fDownloadsStaleness).
+				Msg("Starting downloads updater")
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+
+				case <-ticker:
+					threshold := time.Now().Add(-*fDownloadsStaleness).Format(time.RFC3339)
+
+					staleView := db.Query(
+						ctx,
+						"_design/npm_replication",
+						"downloads_stale",
+						kivik.Param("limit", strconv.Itoa(*fDownloadsUpdateBatchSize)),
+						kivik.Param("include_docs", "true"),
+						kivik.Param("startkey", nil),
+						kivik.Param("endkey", threshold),
+					)
+					if err := staleView.Err(); err != nil {
+						log.Error().Err(err).Msg("could not fetch stale downloads view")
+						continue
+					}
+
+					var dlWg sync.WaitGroup
+					for staleView.Next() {
+						var packageID string
+						if err := staleView.ScanValue(&packageID); err != nil {
+							// value is null from the view, get ID instead
+						}
+						packageID, _ = staleView.ID()
+
+						var pkg replicator.RegistryPackage
+						if err := staleView.ScanDoc(&pkg); err != nil {
+							log.Error().Err(err).Str("package", packageID).Msg("failed to scan document for downloads update")
+							continue
+						}
+
+						log := log.With().Str("package_id", packageID).Logger()
+
+						dlWg.Go(func() {
+							start := time.Now()
+
+							counts, err := npmClient.PackageAllDownloads(ctx, packageID, pkg.Version.Version)
+							duration := time.Since(start)
+							downloadsFetchDuration.Observe(duration.Seconds())
+
+							if err != nil {
+								var httpErr httpclient.UnexpectedHTTPStatusCodeError
+								if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+									log.Debug().Msg("Package not found on downloads API, setting zero counts")
+									counts = &npm.DownloadCounts{}
+								} else {
+									log.Error().Err(err).Msg("failed to fetch download counts")
+									downloadsErrorsTotal.With(prometheus.Labels{"reason": "fetch"}).Inc()
+									return
+								}
+							}
+
+							now := time.Now()
+							pkg.Downloads = counts
+							pkg.Replicator.DownloadsLastUpdated = &now
+
+							_, err = db.Put(context.Background(), packageID, pkg)
+							if err != nil {
+								var httpErr *chttp.HTTPError
+								if errors.As(err, &httpErr) && httpErr.HTTPStatus() == http.StatusConflict {
+									log.Debug().Msg("CouchDB conflict updating downloads, will retry next cycle")
+									downloadsErrorsTotal.With(prometheus.Labels{"reason": "conflict"}).Inc()
+								} else {
+									log.Error().Err(err).Msg("could not update downloads in CouchDB")
+									downloadsErrorsTotal.With(prometheus.Labels{"reason": "put"}).Inc()
+								}
+								return
+							}
+
+							downloadsUpdatedTotal.Inc()
+							log.Debug().
+								Int("last_day", counts.LastDay).
+								Int("last_week", counts.LastWeek).
+								Int("last_month", counts.LastMonth).
+								Msg("updated download counts")
+						})
+					}
+					dlWg.Wait()
+
+					if staleView.Err() != nil {
+						log.Error().Err(staleView.Err()).Msg("error iterating stale downloads view")
+					}
+				}
+			}
+		})
+	}
 
 	if *fMetricsListenAddr != "" {
 		wg.Go(func() {
@@ -613,5 +765,51 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 		localDocumentCount.With(prometheus.Labels{"status": "up-to-date"}).Set(float64(upToDate))
 		localDocumentCount.With(prometheus.Labels{"status": "faulty"}).Set(float64(faulty))
 		localDocumentCount.With(prometheus.Labels{"status": "is-fixable-with-time"}).Set(float64(isFixableWithTime))
+	}
+
+	if *fDownloadsEnabled {
+		dlStatusView := db.Query(ctx, "_design/npm_replication", "downloads_status_count", kivik.Param("group", "true"))
+		if err := dlStatusView.Err(); err != nil {
+			log.Error().Err(err).Msg("could not fetch downloads status count")
+			return
+		}
+
+		neverFetched := 0
+		dlUpToDate := 0
+		stale := 0
+
+		for dlStatusView.Next() {
+			var key string
+			if err := dlStatusView.ScanKey(&key); err != nil {
+				log.Error().Err(err).Msg("failed to read downloads stat key")
+				return
+			}
+
+			var output *int
+			switch key {
+			case "never-fetched":
+				output = &neverFetched
+			case "up-to-date":
+				output = &dlUpToDate
+			case "stale":
+				output = &stale
+			default:
+				log.Warn().Str("key", key).Msg("unknown downloads status key")
+				continue
+			}
+
+			if err := dlStatusView.ScanValue(output); err != nil {
+				log.Error().Err(err).Msg("failed to read downloads stat value")
+				return
+			}
+		}
+		if dlStatusView.Err() != nil {
+			log.Error().Err(dlStatusView.Err()).Msg("failed to fetch downloads document stats")
+			return
+		}
+
+		downloadsDocumentCount.With(prometheus.Labels{"status": "never-fetched"}).Set(float64(neverFetched))
+		downloadsDocumentCount.With(prometheus.Labels{"status": "up-to-date"}).Set(float64(dlUpToDate))
+		downloadsDocumentCount.With(prometheus.Labels{"status": "stale"}).Set(float64(stale))
 	}
 }

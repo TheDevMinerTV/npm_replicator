@@ -12,11 +12,13 @@ const (
 type Client struct {
 	replicateClient *httpclient.Client
 	registryClient  *httpclient.Client
+	downloadsClient *httpclient.Client
 }
 
 func New() *Client {
 	return &Client{
 		replicateClient: httpclient.New(ReplicateBaseURL),
 		registryClient:  httpclient.New(RegistryBaseURL),
+		downloadsClient: httpclient.New(DownloadsBaseURL),
 	}
 }
