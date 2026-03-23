@@ -7,3 +7,5 @@ scrape_configs:
   - job_name: replicator
     static_configs:
       - targets: ["replicator:50111"]
+remote_write:
+  - url: http://victoriametrics:8428/api/v1/write
