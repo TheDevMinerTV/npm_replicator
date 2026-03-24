@@ -28,8 +28,8 @@ import (
 	"github.com/thedevminertv/npm-replicator/pkg/httpclient"
 	"github.com/thedevminertv/npm-replicator/pkg/npm"
 	"github.com/thedevminertv/npm-replicator/pkg/replicator"
-	xproxy "golang.org/x/net/proxy"
 	"github.com/thedevminertv/npm-replicator/pkg/webhooks"
+	xproxy "golang.org/x/net/proxy"
 )
 
 type stringSlice []string
@@ -38,6 +38,14 @@ func (s *stringSlice) String() string         { return "" }
 func (s *stringSlice) Set(value string) error { *s = append(*s, value); return nil }
 
 var (
+	localDBCompactionRunning = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "couchdb",
+			Name:      "compaction_running",
+			Help:      "Compaction process running according to CouchDB",
+		},
+	)
 	localDBActiveSize = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "npm_replicator",
@@ -209,6 +217,7 @@ func init() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}).Level(logLevel)
 
 	prometheus.MustRegister(
+		localDBCompactionRunning,
 		localDBActiveSize,
 		localDBSize,
 		localDocumentCount,
@@ -745,6 +754,12 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 		log.Error().Err(err).Msg("failed to get db stats")
 		return
 	}
+
+	compactRunning := float64(0)
+	if stats.CompactRunning {
+		compactRunning = 1
+	}
+	localDBCompactionRunning.Set(compactRunning)
 
 	localDBSize.Set(float64(stats.DiskSize))
 	localDBActiveSize.Set(float64(stats.ActiveSize))
