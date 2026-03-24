@@ -1,6 +1,6 @@
 services:
   victoriametrics:
-    image: victoriametrics/victoria-metrics:v1.122.17
+    image: victoriametrics/victoria-metrics:v1.138.0
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -34,6 +34,7 @@ services:
       options:
         max-size: "2m"
         max-file: "3"
+    user: nobody
     environment:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
       - GF_AUTH_ANONYMOUS_ENABLED=true
@@ -45,7 +46,12 @@ services:
   replicator:
     build: .
     restart: unless-stopped
-    networks: [ default ]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "2m"
+    volumes:
+      - ./data/replicator:/data
     command:
       - --couchdb-url=<COUCHDB_URL>
       - --couchdb-username=<COUCHDB_USERNAME>
