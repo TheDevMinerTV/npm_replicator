@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 0,
+  "id": 1,
   "links": [],
   "panels": [
     {
@@ -278,7 +278,7 @@
         {
           "editorMode": "code",
           "exemplar": false,
-          "expr": "irate(npm_replicator_events_last_synced_sequence_id[1m])",
+          "expr": "rate(npm_replicator_events_last_synced_sequence_id[$__rate_interval])",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -812,7 +812,7 @@
         {
           "editorMode": "code",
           "exemplar": false,
-          "expr": "irate(npm_replicator_events_document_count{status=\"up-to-date\"}[$__rate_interval])",
+          "expr": "rate(npm_replicator_events_document_count{status=\"up-to-date\"}[$__rate_interval])",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -1014,20 +1014,28 @@
             "mode": "thresholds"
           },
           "mappings": [],
-          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "red",
                 "value": 0
               },
               {
-                "color": "red",
-                "value": 1
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "yellow",
+                "value": 75
+              },
+              {
+                "color": "green",
+                "value": 95
               }
             ]
-          }
+          },
+          "unit": "percentunit"
         },
         "overrides": []
       },
@@ -1037,8 +1045,7 @@
         "x": 9,
         "y": 24
       },
-      "id": 24,
-      "interval": "60s",
+      "id": 29,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -1053,20 +1060,20 @@
           "values": false
         },
         "showPercentChange": false,
-        "textMode": "value_and_name",
+        "textMode": "auto",
         "wideLayout": true
       },
       "pluginVersion": "12.2.1",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "irate(npm_replicator_downloads_errors_total[5m])",
-          "legendFormat": "{{reason}}",
+          "expr": "(npm_replicator_downloads_document_count{status=\"up-to-date\"}) / sum(npm_replicator_downloads_document_count{status!=\"up-to-date\"})",
+          "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Errors",
+      "title": "Completed",
       "type": "stat"
     },
     {
@@ -1123,7 +1130,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "irate(npm_replicator_downloads_updated_total[5m])",
+          "expr": "rate(npm_replicator_downloads_updated_total[$__rate_interval])",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -1149,6 +1156,14 @@
               {
                 "color": "green",
                 "value": 0
+              },
+              {
+                "color": "#EAB839",
+                "value": 3628800
+              },
+              {
+                "color": "red",
+                "value": 15778476
               }
             ]
           },
@@ -1191,6 +1206,145 @@
         }
       ],
       "title": "Estimated Catch-up Time",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "default_prometheus_ds"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "dark-yellow",
+                "value": 1
+              },
+              {
+                "color": "#EAB839",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 5,
+        "x": 9,
+        "y": 31
+      },
+      "id": 30,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "(npm_replicator_downloads_document_count{status=\"stale\"}) / sum(npm_replicator_downloads_document_count{status!=\"stale\"})",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Stale",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "default_prometheus_ds"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 5,
+        "x": 14,
+        "y": 31
+      },
+      "id": 24,
+      "interval": "60s",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "irate(npm_replicator_downloads_errors_total[5m])",
+          "legendFormat": "{{reason}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Errors",
       "type": "stat"
     },
     {
@@ -1610,6 +1764,96 @@
       ],
       "title": "Active size",
       "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "default_prometheus_ds"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed"
+          },
+          "custom": {
+            "axisPlacement": "auto",
+            "fillOpacity": 70,
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineWidth": 0,
+            "spanNulls": false
+          },
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "green",
+                  "index": 0,
+                  "text": "Not running"
+                },
+                "1": {
+                  "color": "orange",
+                  "index": 1,
+                  "text": "Running"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 10,
+        "y": 45
+      },
+      "id": 28,
+      "options": {
+        "alignValue": "left",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "mergeValues": true,
+        "rowHeight": 0.9,
+        "showValue": "auto",
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "npm_replicator_couchdb_compaction_running",
+          "legendFormat": "npm.devminer.xyz",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Database Compaction",
+      "type": "state-timeline"
     }
   ],
   "preload": false,
@@ -1627,5 +1871,5 @@
   "timezone": "browser",
   "title": "NPM Replicator",
   "uid": "df3ndculyvu2of",
-  "version": 7
+  "version": 10
 }
