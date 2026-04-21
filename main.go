@@ -131,6 +131,15 @@ var (
 		},
 		[]string{"status"},
 	)
+	downloadsCountSum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "downloads",
+			Name:      "count_sum",
+			Help:      "Sum of download counts across all packages, per period",
+		},
+		[]string{"period"},
+	)
 	downloadsProxyErrors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "npm_replicator",
@@ -232,6 +241,7 @@ func init() {
 		downloadsErrorsTotal,
 		downloadsFetchDuration,
 		downloadsDocumentCount,
+		downloadsCountSum,
 		downloadsProxyErrors,
 	)
 }
@@ -858,6 +868,29 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 		downloadsDocumentCount.With(prometheus.Labels{"status": "never-fetched"}).Set(float64(neverFetched))
 		downloadsDocumentCount.With(prometheus.Labels{"status": "up-to-date"}).Set(float64(dlUpToDate))
 		downloadsDocumentCount.With(prometheus.Labels{"status": "stale"}).Set(float64(stale))
+
+		sumView := db.Query(ctx, "_design/downloads", "sum", kivik.Param("reduce", "true"))
+		if err := sumView.Err(); err != nil {
+			log.Error().Err(err).Msg("could not fetch downloads sum view")
+			return
+		}
+
+		var sums [4]int64
+		if sumView.Next() {
+			if err := sumView.ScanValue(&sums); err != nil {
+				log.Error().Err(err).Msg("failed to read downloads sum value")
+				return
+			}
+		}
+		if sumView.Err() != nil {
+			log.Error().Err(sumView.Err()).Msg("failed to fetch downloads sum")
+			return
+		}
+
+		downloadsCountSum.With(prometheus.Labels{"period": "last-day"}).Set(float64(sums[0]))
+		downloadsCountSum.With(prometheus.Labels{"period": "last-week"}).Set(float64(sums[1]))
+		downloadsCountSum.With(prometheus.Labels{"period": "last-month"}).Set(float64(sums[2]))
+		downloadsCountSum.With(prometheus.Labels{"period": "last-week-version"}).Set(float64(sums[3]))
 	}
 }
 
