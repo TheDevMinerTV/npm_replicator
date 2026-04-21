@@ -244,7 +244,7 @@
               }
             ]
           },
-          "unit": "epm"
+          "unit": "eps"
         },
         "overrides": []
       },
@@ -368,7 +368,7 @@
               }
             ]
           },
-          "unit": "docs/min"
+          "unit": "doc/s"
         },
         "overrides": []
       },
@@ -402,7 +402,7 @@
         {
           "editorMode": "code",
           "exemplar": false,
-          "expr": "irate(npm_replicator_events_document_count{status=\"total\"}[1m])",
+          "expr": "rate(npm_replicator_events_document_count{status=\"total\"}[$__rate_interval])",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -778,7 +778,7 @@
               }
             ]
           },
-          "unit": "docs/min"
+          "unit": "pkg/s"
         },
         "overrides": []
       },
@@ -1023,15 +1023,15 @@
               },
               {
                 "color": "orange",
-                "value": 50
+                "value": 0.5
               },
               {
                 "color": "yellow",
-                "value": 75
+                "value": 0.75
               },
               {
                 "color": "green",
-                "value": 95
+                "value": 0.95
               }
             ]
           },
@@ -1041,7 +1041,7 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 5,
+        "w": 3,
         "x": 9,
         "y": 24
       },
@@ -1067,13 +1067,86 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "(npm_replicator_downloads_document_count{status=\"up-to-date\"}) / sum(npm_replicator_downloads_document_count{status!=\"up-to-date\"})",
+          "expr": "sum(npm_replicator_downloads_document_count{status=\"up-to-date\"}) \n/ \nsum(npm_replicator_downloads_document_count)",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
       "title": "Completed",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "default_prometheus_ds"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "dark-yellow",
+                "value": 1
+              },
+              {
+                "color": "#EAB839",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 3,
+        "x": 12,
+        "y": 24
+      },
+      "id": 30,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "(npm_replicator_downloads_document_count{status=\"stale\"}) / sum(npm_replicator_downloads_document_count{status!=\"stale\"})",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Stale",
       "type": "stat"
     },
     {
@@ -1097,14 +1170,14 @@
               }
             ]
           },
-          "unit": "pkgs/min"
+          "unit": "pkg/s"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 7,
         "w": 5,
-        "x": 14,
+        "x": 15,
         "y": 24
       },
       "id": 23,
@@ -1173,8 +1246,8 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 5,
-        "x": 19,
+        "w": 4,
+        "x": 20,
         "y": 24
       },
       "id": 27,
@@ -1219,38 +1292,27 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
                 "color": "green",
                 "value": 0
-              },
-              {
-                "color": "dark-yellow",
-                "value": 1
-              },
-              {
-                "color": "#EAB839",
-                "value": 5
-              },
-              {
-                "color": "red",
-                "value": 10
               }
             ]
           },
-          "unit": "percentunit"
+          "unit": "short"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 7,
-        "w": 5,
+        "w": 9,
         "x": 9,
         "y": 31
       },
-      "id": 30,
+      "id": 31,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
@@ -1272,13 +1334,27 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "(npm_replicator_downloads_document_count{status=\"stale\"}) / sum(npm_replicator_downloads_document_count{status!=\"stale\"})",
-          "legendFormat": "__auto",
+          "expr": "npm_replicator_downloads_count_sum{period=\"last-day\"}",
+          "legendFormat": "Last day",
           "range": true,
-          "refId": "A"
+          "refId": "LastDay"
+        },
+        {
+          "editorMode": "code",
+          "expr": "npm_replicator_downloads_count_sum{period=\"last-week\"}",
+          "legendFormat": "Last week",
+          "range": true,
+          "refId": "LastWeek"
+        },
+        {
+          "editorMode": "code",
+          "expr": "npm_replicator_downloads_count_sum{period=\"last-month\"}",
+          "legendFormat": "Last month",
+          "range": true,
+          "refId": "LastMonth"
         }
       ],
-      "title": "Stale",
+      "title": "Total downloads (sum of replicated packages)",
       "type": "stat"
     },
     {
@@ -1311,8 +1387,8 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 5,
-        "x": 14,
+        "w": 3,
+        "x": 18,
         "y": 31
       },
       "id": 24,
@@ -1382,8 +1458,8 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 5,
-        "x": 19,
+        "w": 3,
+        "x": 21,
         "y": 31
       },
       "id": 25,
@@ -1417,111 +1493,6 @@
       ],
       "title": "Fetch duration (p95)",
       "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "default_prometheus_ds"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 9,
-        "x": 0,
-        "y": 31
-      },
-      "id": 31,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "12.2.1",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "npm_replicator_downloads_count_sum{period=\"last-day\"}",
-          "legendFormat": "Last day",
-          "range": true,
-          "refId": "LastDay"
-        },
-        {
-          "editorMode": "code",
-          "expr": "npm_replicator_downloads_count_sum{period=\"last-week\"}",
-          "legendFormat": "Last week",
-          "range": true,
-          "refId": "LastWeek"
-        },
-        {
-          "editorMode": "code",
-          "expr": "npm_replicator_downloads_count_sum{period=\"last-month\"}",
-          "legendFormat": "Last month",
-          "range": true,
-          "refId": "LastMonth"
-        }
-      ],
-      "title": "Total downloads (sum of replicated packages)",
-      "type": "timeseries"
     },
     {
       "collapsed": false,
@@ -1976,5 +1947,5 @@
   "timezone": "browser",
   "title": "NPM Replicator",
   "uid": "df3ndculyvu2of",
-  "version": 10
+  "version": 14
 }
