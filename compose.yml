@@ -44,7 +44,7 @@ services:
       - ./data/grafana:/var/lib/grafana
 
   couchdb-exporter:
-    image: gesellix/couchdb-prometheus-exporter:30
+    image: gesellix/couchdb-prometheus-exporter:v30.17.0
     restart: unless-stopped
     logging:
       driver: "json-file"
