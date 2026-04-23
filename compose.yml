@@ -43,6 +43,21 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./data/grafana:/var/lib/grafana
 
+  couchdb-exporter:
+    image: gesellix/couchdb-prometheus-exporter:30
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "2m"
+        max-file: "3"
+    command:
+      - --couchdb.uri=<COUCHDB_URL>
+      - --couchdb.username=<COUCHDB_USERNAME>
+      - --couchdb.password=<COUCHDB_PASSWORD>
+      - --databases=registry
+      - --telemetry.address=:9984
+
   replicator:
     build: .
     restart: unless-stopped
