@@ -940,7 +940,7 @@ func (rr *roundRobinTransport) RoundTrip(req *http.Request) (*http.Response, err
 	n := uint64(len(rr.proxies))
 	start := rr.idx.Add(1) - 1
 
-	for offset := uint64(0); offset < n; offset++ {
+	for offset := range n {
 		ps := rr.proxies[(start+offset)%n]
 
 		if downUntil := ps.downUntil.Load(); downUntil != 0 {
