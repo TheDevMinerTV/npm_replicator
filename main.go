@@ -149,6 +149,24 @@ var (
 		},
 		[]string{"proxy"},
 	)
+
+	tarballSizeUpdatedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "tarball",
+			Name:      "size_updated_total",
+			Help:      "Total number of tarball sizes fetched and stored",
+		},
+	)
+	tarballSizeErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "tarball",
+			Name:      "size_errors_total",
+			Help:      "Total number of tarball size fetch errors",
+		},
+		[]string{"reason"},
+	)
 )
 
 var (
@@ -243,6 +261,8 @@ func init() {
 		downloadsDocumentCount,
 		downloadsCountSum,
 		downloadsProxyErrors,
+		tarballSizeUpdatedTotal,
+		tarballSizeErrorsTotal,
 	)
 }
 
@@ -585,6 +605,22 @@ func main() {
 									DownloadsLastUpdated: pkg.Replicator.DownloadsLastUpdated,
 									HasInvalidTag:        hasInvalidTag,
 								},
+							}
+
+							if pkg.Dist.Tarball != "" {
+								size, err := npmClient.TarballSize(ctx, pkg.Dist.Tarball)
+								if err != nil {
+									reason := "fetch"
+									var httpErr httpclient.UnexpectedHTTPStatusCodeError
+									if errors.As(err, &httpErr) {
+										reason = strconv.Itoa(httpErr.StatusCode)
+									}
+									tarballSizeErrorsTotal.With(prometheus.Labels{"reason": reason}).Inc()
+									log.Warn().Err(err).Str("tarball", pkg.Dist.Tarball).Msg("failed to fetch tarball size")
+								} else {
+									pkg.TarballSize = &size
+									tarballSizeUpdatedTotal.Inc()
+								}
 							}
 
 							// background context to make sure all of these are done before actually allowing the goroutine to exit

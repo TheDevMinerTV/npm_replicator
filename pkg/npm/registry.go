@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/thedevminertv/npm-replicator/pkg/httpclient"
 )
@@ -36,6 +39,30 @@ func (c *Client) PackageMetadata(ctx context.Context, name string) (*PackageMeta
 	}
 
 	return metadata, nil
+}
+
+// TarballSize fetches the byte length of a tarball. npm tarballs sit behind
+// Cloudflare, which strips Content-Length from HEAD responses, so we issue a
+// single-byte range GET and parse Content-Range (format: "bytes 0-0/<total>").
+func (c *Client) TarballSize(ctx context.Context, tarballURL string) (int64, error) {
+	respHeader, _, err := c.tarballClient.Get(ctx, tarballURL, nil, http.Header{
+		"Range": []string{"bytes=0-0"},
+	}, httpclient.ExactStatusCode(http.StatusPartialContent))
+	if err != nil {
+		return 0, err
+	}
+
+	cr := respHeader.Get("Content-Range")
+	if cr == "" {
+		return 0, fmt.Errorf("missing Content-Range header")
+	}
+
+	slash := strings.LastIndex(cr, "/")
+	if slash < 0 {
+		return 0, fmt.Errorf("malformed Content-Range %q", cr)
+	}
+
+	return strconv.ParseInt(cr[slash+1:], 10, 64)
 }
 
 type Repository struct {

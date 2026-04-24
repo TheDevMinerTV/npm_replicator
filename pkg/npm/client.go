@@ -15,6 +15,7 @@ type Client struct {
 	replicateClient *httpclient.Client
 	registryClient  *httpclient.Client
 	downloadsClient *httpclient.Client
+	tarballClient   *httpclient.Client
 }
 
 type ClientOpt func(*clientOptions)
@@ -48,5 +49,6 @@ func New(opts ...ClientOpt) *Client {
 		replicateClient: httpclient.New(ReplicateBaseURL, defaultHeaders),
 		registryClient:  httpclient.New(RegistryBaseURL, defaultHeaders),
 		downloadsClient: httpclient.New(DownloadsBaseURL, downloadsOpts...),
+		tarballClient:   httpclient.New("", defaultHeaders),
 	}
 }

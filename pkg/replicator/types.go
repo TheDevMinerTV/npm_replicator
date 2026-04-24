@@ -21,6 +21,7 @@ type RegistryPackage struct {
 
 	Rev_ *string `json:"_rev,omitempty"`
 
-	Downloads  *npm.DownloadCounts `json:"downloads,omitempty"`
-	Replicator ReplicatorMetadata  `json:"replicator"`
+	TarballSize *int64              `json:"tarballSize,omitempty"`
+	Downloads   *npm.DownloadCounts `json:"downloads,omitempty"`
+	Replicator  ReplicatorMetadata  `json:"replicator"`
 }

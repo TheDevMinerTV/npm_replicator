@@ -87,18 +87,20 @@ func New(baseUrl string, opts ...ClientOpt) *Client {
 	return c
 }
 
-func (c *Client) Get(ctx context.Context, path string, queryParams url.Values, headers http.Header, statusChecker StatusCodeCheckFn) (io.Reader, error) {
+func (c *Client) Get(ctx context.Context, path string, queryParams url.Values, headers http.Header, statusChecker StatusCodeCheckFn) (http.Header, io.Reader, error) {
 	return c.runRequest(ctx, http.MethodGet, path, queryParams, headers, nil, statusChecker)
 }
 
 func (c *Client) GetJSON(ctx context.Context, path string, queryParams url.Values, headers http.Header, statusChecker StatusCodeCheckFn) (io.Reader, error) {
-	return c.Get(ctx, path, queryParams, http.Header{
+	_, body, err := c.Get(ctx, path, queryParams, http.Header{
 		"Accept": []string{"application/json"},
 	}, statusChecker)
+	return body, err
 }
 
 func (c *Client) Post(ctx context.Context, path string, queryParams url.Values, headers http.Header, body io.Reader, statusChecker StatusCodeCheckFn) (io.Reader, error) {
-	return c.runRequest(ctx, http.MethodPost, path, queryParams, headers, body, statusChecker)
+	_, resBody, err := c.runRequest(ctx, http.MethodPost, path, queryParams, headers, body, statusChecker)
+	return resBody, err
 }
 
 func (c *Client) PostJSON(ctx context.Context, path string, queryParams url.Values, body any, statusChecker StatusCodeCheckFn) (io.Reader, error) {
@@ -113,7 +115,8 @@ func (c *Client) PostJSON(ctx context.Context, path string, queryParams url.Valu
 }
 
 func (c *Client) Patch(ctx context.Context, path string, queryParams url.Values, headers http.Header, body io.Reader, statusChecker StatusCodeCheckFn) (io.Reader, error) {
-	return c.runRequest(ctx, http.MethodPatch, path, queryParams, headers, body, statusChecker)
+	_, resBody, err := c.runRequest(ctx, http.MethodPatch, path, queryParams, headers, body, statusChecker)
+	return resBody, err
 }
 
 func (c *Client) PatchJSON(ctx context.Context, path string, queryParams url.Values, body any, statusChecker StatusCodeCheckFn) (io.Reader, error) {
@@ -127,10 +130,10 @@ func (c *Client) PatchJSON(ctx context.Context, path string, queryParams url.Val
 	}, bytes.NewReader(rawBody), statusChecker)
 }
 
-func (c *Client) runRequest(ctx context.Context, method, path string, queryParams url.Values, headers http.Header, reqBody io.Reader, statusChecker StatusCodeCheckFn) (io.Reader, error) {
+func (c *Client) runRequest(ctx context.Context, method, path string, queryParams url.Values, headers http.Header, reqBody io.Reader, statusChecker StatusCodeCheckFn) (http.Header, io.Reader, error) {
 	url, err := url.Parse(fmt.Sprintf("%s%s", c.baseURL, path))
 	if err != nil {
-		return nil, fmt.Errorf("failed to build request URL: %w", err)
+		return nil, nil, fmt.Errorf("failed to build request URL: %w", err)
 	}
 
 	url.RawQuery = queryParams.Encode()
@@ -144,7 +147,7 @@ func (c *Client) runRequest(ctx context.Context, method, path string, queryParam
 	if c.logRequests && reqBody != nil {
 		bodyBytes, err = io.ReadAll(reqBody)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read request body for logging: %w", err)
+			return nil, nil, fmt.Errorf("failed to read request body for logging: %w", err)
 		}
 
 		reqBody = bytes.NewReader(bodyBytes)
@@ -152,7 +155,7 @@ func (c *Client) runRequest(ctx context.Context, method, path string, queryParam
 
 	req, err := http.NewRequestWithContext(ctx, method, url.String(), reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	applyHeaders(req.Header, c.baseHeaders)
@@ -178,7 +181,7 @@ func (c *Client) runRequest(ctx context.Context, method, path string, queryParam
 	resp, err := c.httpClient.Do(req)
 	duration := time.Since(start)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to send request: %w", err)
+		return nil, nil, fmt.Errorf("Failed to send request: %w", err)
 	}
 
 	logger = logger.With().Dur("duration", duration).Int("statusCode", resp.StatusCode).Logger()
@@ -210,10 +213,10 @@ func (c *Client) runRequest(ctx context.Context, method, path string, queryParam
 			Err(err).
 			Msg("Failed not query endpoint")
 
-		return nil, err
+		return nil, nil, err
 	}
 
-	return resBody, nil
+	return resp.Header, resBody, nil
 }
 
 type UnexpectedHTTPStatusCodeError struct {
