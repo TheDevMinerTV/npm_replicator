@@ -205,6 +205,7 @@ type Version struct {
 	Author       Users       `json:"author,omitempty"`
 	Maintainers  Users       `json:"maintainers,omitempty"`
 	Contributors Users       `json:"contributors,omitempty"`
+	Deprecated   *string     `json:"deprecated,omitempty"`
 	Dist         struct {
 		Tarball      string `json:"tarball"`
 		FileCount    *int   `json:"fileCount,omitempty"`
