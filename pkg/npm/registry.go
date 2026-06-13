@@ -197,15 +197,15 @@ func (u *Users) UnmarshalJSON(data []byte) error {
 }
 
 type Version struct {
-	Name         string      `json:"name"`
-	Description  string      `json:"description"`
-	Keywords     Keywords    `json:"keywords,omitempty"`
-	Repository   *Repository `json:"repository,omitempty"`
-	Version      string      `json:"version"`
-	Author       Users       `json:"author,omitempty"`
-	Maintainers  Users       `json:"maintainers,omitempty"`
-	Contributors Users       `json:"contributors,omitempty"`
-	Deprecated   *string     `json:"deprecated,omitempty"`
+	Name         string           `json:"name"`
+	Description  string           `json:"description"`
+	Keywords     Keywords         `json:"keywords,omitempty"`
+	Repository   *Repository      `json:"repository,omitempty"`
+	Version      string           `json:"version"`
+	Author       Users            `json:"author,omitempty"`
+	Maintainers  Users            `json:"maintainers,omitempty"`
+	Contributors Users            `json:"contributors,omitempty"`
+	Deprecated   *DeprecationInfo `json:"deprecated,omitempty"`
 	Dist         struct {
 		Tarball      string `json:"tarball"`
 		FileCount    *int   `json:"fileCount,omitempty"`
@@ -341,6 +341,39 @@ func (k *Keywords) UnmarshalJSON(data []byte) error {
 	}
 
 	*k = w
+
+	return nil
+}
+
+type DeprecationInfo struct {
+	Deprecated bool    `json:"deprecated"`
+	Message    *string `json:"message,omitempty"`
+}
+
+func (d *DeprecationInfo) UnmarshalJSON(data []byte) error {
+	{
+		// try decoding as string
+		var msg string
+		if err := json.Unmarshal(data, &msg); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			d.Deprecated = true
+			d.Message = &msg
+
+			return nil
+		}
+	}
+
+	// If not string, try as bool
+	var deprecated bool
+	if err := json.Unmarshal(data, &deprecated); err != nil {
+		return err
+	}
+
+	d.Deprecated = deprecated
 
 	return nil
 }
