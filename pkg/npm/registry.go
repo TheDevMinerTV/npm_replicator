@@ -367,13 +367,32 @@ func (d *DeprecationInfo) UnmarshalJSON(data []byte) error {
 		}
 	}
 
-	// If not string, try as bool
-	var deprecated bool
-	if err := json.Unmarshal(data, &deprecated); err != nil {
+	{
+		// try as bool
+		var deprecated bool
+		if err := json.Unmarshal(data, &deprecated); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			d.Deprecated = deprecated
+
+			return nil
+		}
+	}
+
+	// try as the object itself
+	var obj struct {
+		Deprecated bool    `json:"deprecated"`
+		Message    *string `json:"message,omitempty"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
 		return err
 	}
 
-	d.Deprecated = deprecated
+	d.Deprecated = obj.Deprecated
+	d.Message = obj.Message
 
 	return nil
 }
