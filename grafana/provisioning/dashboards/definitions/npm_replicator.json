@@ -746,6 +746,19 @@
             "type": "prometheus",
             "uid": "default_prometheus_ds"
           },
+          "editorMode": "builder",
+          "expr": "npm_replicator_events_document_count{status=\"deleted\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Deleted",
+          "range": true,
+          "refId": "Deleted"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "default_prometheus_ds"
+          },
           "editorMode": "code",
           "expr": "npm_replicator_upstream_document_count",
           "hide": false,
@@ -1947,5 +1960,5 @@
   "timezone": "browser",
   "title": "NPM Replicator",
   "uid": "df3ndculyvu2of",
-  "version": 14
+  "version": 16
 }
