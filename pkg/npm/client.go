@@ -48,7 +48,7 @@ func New(opts ...ClientOpt) *Client {
 	}
 
 	registryOpts := []httpclient.ClientOpt{defaultHeaders}
-	if o.downloadsHTTPClient != nil {
+	if o.registryHTTPClient != nil {
 		registryOpts = append(registryOpts, httpclient.WithCustomClient(o.registryHTTPClient))
 	}
 
