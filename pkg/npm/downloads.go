@@ -9,7 +9,7 @@ import (
 	"github.com/thedevminertv/npm-replicator/pkg/httpclient"
 )
 
-const DownloadsBaseURL = "https://api.npmjs.org"
+const DownloadsBaseURL = "http://api.npmjs.org"
 
 type DownloadCounts struct {
 	LastDay         int `json:"lastDay"`

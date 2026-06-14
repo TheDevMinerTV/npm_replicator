@@ -187,6 +187,9 @@ var (
 	fBatchedMetadataUpdateInterval = flag.Duration("metadata-update-interval", 15*time.Second, "Interval between batched metadata updates")
 	fMetadataUpdateBatchSize       = flag.Int("metadata-update-batch-size", 10, "Batch size for metadata updates")
 
+	fRegistryProxyFile     = flag.String("registry-proxy-file", "", "Path to file with proxy URLs (one per line) for the registry client")
+	fRegistryProxyCooldown = flag.Duration("registry-proxy-cooldown", 30*time.Second, "Cooldown duration for downed proxies before retrying")
+
 	fDownloadsEnabled         = flag.Bool("downloads-enabled", false, "Enable download count fetching")
 	fDownloadsUpdateInterval  = flag.Duration("downloads-update-interval", 60*time.Second, "Interval between download count update batches")
 	fDownloadsUpdateBatchSize = flag.Int("downloads-update-batch-size", 10, "Batch size for download count updates")
@@ -271,10 +274,26 @@ func main() {
 	defer cancel()
 
 	var npmOpts []npm.ClientOpt
+	if *fRegistryProxyFile != "" {
+		proxies, err := loadProxies(*fRegistryProxyFile)
+		if err != nil {
+			log.Fatal().Err(err).Str("file", *fRegistryProxyFile).Msg("Failed to load registry proxy list")
+		}
+		log.Info().Int("count", len(proxies)).Msg("Loaded registry proxies")
+
+		proxyStates, err := buildProxyTransports(proxies)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to build proxy transports")
+		}
+		npmOpts = append(npmOpts, npm.WithRegistryHTTPClient(&http.Client{
+			Transport: &roundRobinTransport{proxies: proxyStates, cooldown: *fDownloadsProxyCooldown},
+			Timeout:   10 * time.Second,
+		}))
+	}
 	if *fDownloadsProxyFile != "" {
 		proxies, err := loadProxies(*fDownloadsProxyFile)
 		if err != nil {
-			log.Fatal().Err(err).Str("file", *fDownloadsProxyFile).Msg("Failed to load proxy list")
+			log.Fatal().Err(err).Str("file", *fDownloadsProxyFile).Msg("Failed to load downloads proxy list")
 		}
 		log.Info().Int("count", len(proxies)).Msg("Loaded download proxies")
 

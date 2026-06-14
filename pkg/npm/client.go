@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	RegistryBaseURL  = "https://registry.npmjs.com"
+	RegistryBaseURL  = "http://registry.npmjs.com"
 	ReplicateBaseURL = "https://replicate.npmjs.com/registry"
 )
 
@@ -22,6 +22,13 @@ type ClientOpt func(*clientOptions)
 
 type clientOptions struct {
 	downloadsHTTPClient *http.Client
+	registryHTTPClient  *http.Client
+}
+
+func WithRegistryHTTPClient(c *http.Client) ClientOpt {
+	return func(o *clientOptions) {
+		o.registryHTTPClient = c
+	}
 }
 
 func WithDownloadsHTTPClient(c *http.Client) ClientOpt {
@@ -40,6 +47,11 @@ func New(opts ...ClientOpt) *Client {
 		opt(o)
 	}
 
+	registryOpts := []httpclient.ClientOpt{defaultHeaders}
+	if o.downloadsHTTPClient != nil {
+		registryOpts = append(registryOpts, httpclient.WithCustomClient(o.registryHTTPClient))
+	}
+
 	downloadsOpts := []httpclient.ClientOpt{defaultHeaders}
 	if o.downloadsHTTPClient != nil {
 		downloadsOpts = append(downloadsOpts, httpclient.WithCustomClient(o.downloadsHTTPClient))
@@ -47,7 +59,7 @@ func New(opts ...ClientOpt) *Client {
 
 	return &Client{
 		replicateClient: httpclient.New(ReplicateBaseURL, defaultHeaders),
-		registryClient:  httpclient.New(RegistryBaseURL, defaultHeaders),
+		registryClient:  httpclient.New(RegistryBaseURL, registryOpts...),
 		downloadsClient: httpclient.New(DownloadsBaseURL, downloadsOpts...),
 		tarballClient:   httpclient.New("", defaultHeaders),
 	}
