@@ -386,6 +386,12 @@ func main() {
 	})
 
 	wg.Go(func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().Interface("recovered", r).Msg("recovered from panic in changestream fetcher")
+			}
+		}()
+
 		ticker := time.Tick(*fChangestreamFetchInterval)
 		log.Info().
 			Dur("interval", *fChangestreamFetchInterval).
@@ -476,7 +482,8 @@ func main() {
 						// background context to make sure all of these are done before actually allowing the goroutine to exit
 						localRev, err := db.Put(context.Background(), change.ID, pkg)
 						if err != nil {
-							log.Panic().Err(err).Msg("Could not update replicator document")
+							log.Error().Err(err).Msg("Could not update replicator document")
+							break
 						}
 
 						log.Debug().
