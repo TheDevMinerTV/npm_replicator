@@ -214,6 +214,54 @@ type Version struct {
 	Dependencies    map[string]string `json:"dependencies,omitempty"`
 	DevDependencies map[string]string `json:"devDependencies,omitempty"`
 	Engines         Engines           `json:"engines,omitempty"`
+	Bin             *Bin              `json:"bin,omitempty"`
+}
+
+// Bin represents the npm package "bin" field
+//
+// npm allows two forms:
+// - bare string (package's unscoped name)
+// - object mapping (command name -> script paths).
+type Bin struct {
+	// Path is set when bin was a bare string: the script path for the single executable
+	Path *string
+	// Commands is set when bin was an object of command name -> script path
+	Commands map[string]string
+}
+
+func (b *Bin) UnmarshalJSON(data []byte) error {
+	{
+		// try decoding as string
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			b.Path = &s
+			b.Commands = nil
+			return nil
+		}
+	}
+
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+
+	b.Path = nil
+	b.Commands = m
+
+	return nil
+}
+
+func (b Bin) MarshalJSON() ([]byte, error) {
+	if b.Path != nil {
+		return json.Marshal(*b.Path)
+	}
+
+	return json.Marshal(b.Commands)
 }
 
 type Engines map[string]string
