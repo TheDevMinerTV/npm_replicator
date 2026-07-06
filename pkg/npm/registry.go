@@ -214,35 +214,27 @@ type Version struct {
 	Dependencies    map[string]string `json:"dependencies,omitempty"`
 	DevDependencies map[string]string `json:"devDependencies,omitempty"`
 	Engines         Engines           `json:"engines,omitempty"`
-	Bin             *Bin              `json:"bin,omitempty"`
+	Bin             Bin               `json:"bin,omitempty"`
 }
 
-// Bin represents the npm package "bin" field
-//
-// npm allows two forms:
-// - bare string (package's unscoped name)
-// - object mapping (command name -> script paths).
-type Bin struct {
-	// Path is set when bin was a bare string: the script path for the single executable
-	Path *string
-	// Commands is set when bin was an object of command name -> script path
-	Commands map[string]string
-}
+// Bin represents the npm package "bin" field, normalized into a map of command -> script path
+type Bin map[string]string
+
+// binPendingName is the placeholder key holding a bare-string bin's path until
+// Normalize rewrites it to the package's unscoped name.
+const binPendingName = ""
 
 func (b *Bin) UnmarshalJSON(data []byte) error {
-	{
-		// try decoding as string
-		var s string
-		if err := json.Unmarshal(data, &s); err != nil {
-			var jsonErr *json.UnmarshalTypeError
-			if !errors.As(err, &jsonErr) {
-				return err
-			}
-		} else {
-			b.Path = &s
-			b.Commands = nil
-			return nil
-		}
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+
+	// bare string: a single executable whose command name is the package's
+	// unscoped name — not visible here, so defer it to Normalize.
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*b = Bin{binPendingName: s}
+		return nil
 	}
 
 	var m map[string]string
@@ -250,18 +242,27 @@ func (b *Bin) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	b.Path = nil
-	b.Commands = m
+	*b = m
 
 	return nil
 }
 
-func (b Bin) MarshalJSON() ([]byte, error) {
-	if b.Path != nil {
-		return json.Marshal(*b.Path)
+func (b Bin) Normalize(pkgName string) {
+	path, ok := b[binPendingName]
+	if !ok {
+		return
 	}
 
-	return json.Marshal(b.Commands)
+	delete(b, binPendingName)
+	b[unscopedBinName(pkgName)] = path
+}
+
+func unscopedBinName(name string) string {
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		return name[i+1:]
+	}
+
+	return name
 }
 
 type Engines map[string]string

@@ -632,6 +632,11 @@ func main() {
 								},
 							}
 
+							// resolve a bare-string bin to its unscoped-name command
+							if pkg.Bin != nil {
+								pkg.Bin.Normalize(packageID)
+							}
+
 							if pkg.Dist.Tarball != "" {
 								size, err := npmClient.TarballSize(ctx, pkg.Dist.Tarball)
 								if err != nil {

@@ -5,25 +5,34 @@ import (
 	"testing"
 )
 
-func TestBinUnmarshalRoundTrip(t *testing.T) {
+func TestBinUnmarshalAndNormalize(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
+		pkgName  string
+		want     map[string]string
 		wantJSON string
-		wantPath string // "" if none
-		wantCmds map[string]string
 	}{
 		{
-			name:     "string form",
+			name:     "bare string resolves to unscoped package name",
 			input:    `"cli.js"`,
-			wantJSON: `"cli.js"`,
-			wantPath: "cli.js",
+			pkgName:  "mytool",
+			want:     map[string]string{"mytool": "cli.js"},
+			wantJSON: `{"mytool":"cli.js"}`,
 		},
 		{
-			name:     "object form",
+			name:     "bare string on scoped package strips scope",
+			input:    `"./bin/run.js"`,
+			pkgName:  "@acme/mytool",
+			want:     map[string]string{"mytool": "./bin/run.js"},
+			wantJSON: `{"mytool":"./bin/run.js"}`,
+		},
+		{
+			name:     "object form is preserved and Normalize is a no-op",
 			input:    `{"tsc":"./bin/tsc","tsserver":"./bin/tsserver"}`,
+			pkgName:  "typescript",
+			want:     map[string]string{"tsc": "./bin/tsc", "tsserver": "./bin/tsserver"},
 			wantJSON: `{"tsc":"./bin/tsc","tsserver":"./bin/tsserver"}`,
-			wantCmds: map[string]string{"tsc": "./bin/tsc", "tsserver": "./bin/tsserver"},
 		},
 	}
 
@@ -34,20 +43,14 @@ func TestBinUnmarshalRoundTrip(t *testing.T) {
 				t.Fatalf("unmarshal: %v", err)
 			}
 
-			if tt.wantPath != "" {
-				if b.Path == nil || *b.Path != tt.wantPath {
-					t.Errorf("Path = %v, want %q", b.Path, tt.wantPath)
-				}
-			} else if b.Path != nil {
-				t.Errorf("Path = %q, want nil", *b.Path)
-			}
+			b.Normalize(tt.pkgName)
 
-			if len(tt.wantCmds) != len(b.Commands) {
-				t.Errorf("Commands = %v, want %v", b.Commands, tt.wantCmds)
+			if len(b) != len(tt.want) {
+				t.Fatalf("Bin = %v, want %v", b, tt.want)
 			}
-			for k, v := range tt.wantCmds {
-				if b.Commands[k] != v {
-					t.Errorf("Commands[%q] = %q, want %q", k, b.Commands[k], v)
+			for k, v := range tt.want {
+				if b[k] != v {
+					t.Errorf("Bin[%q] = %q, want %q", k, b[k], v)
 				}
 			}
 
@@ -56,9 +59,20 @@ func TestBinUnmarshalRoundTrip(t *testing.T) {
 				t.Fatalf("marshal: %v", err)
 			}
 			if string(out) != tt.wantJSON {
-				t.Errorf("round-trip = %s, want %s", out, tt.wantJSON)
+				t.Errorf("marshaled = %s, want %s", out, tt.wantJSON)
 			}
 		})
+	}
+}
+
+// A JSON null bin must decode to a nil map, not a placeholder entry.
+func TestBinNull(t *testing.T) {
+	var b Bin
+	if err := json.Unmarshal([]byte(`null`), &b); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if b != nil {
+		t.Fatalf("Bin = %v, want nil", b)
 	}
 }
 
@@ -76,7 +90,7 @@ func TestVersionBinOmittedWhenAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if containsBin := json.Valid(out) && contains(string(out), `"bin"`); containsBin {
+	if contains(string(out), `"bin"`) {
 		t.Errorf("marshaled version unexpectedly contains bin: %s", out)
 	}
 }
