@@ -94,6 +94,25 @@ var (
 		},
 	)
 
+	networkWireBytesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "network",
+			Name:      "wire_bytes_total",
+			Help:      "Socket bytes sent and received by npm fetch operation, including HTTP and TLS protocol bytes",
+		},
+		[]string{"operation", "direction"},
+	)
+	networkRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "network",
+			Name:      "requests_total",
+			Help:      "HTTP transport attempts by npm fetch operation and result family",
+		},
+		[]string{"operation", "result"},
+	)
+
 	metadataProxyErrors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "npm_replicator",
@@ -175,6 +194,16 @@ var (
 		[]string{"reason"},
 	)
 )
+
+type prometheusTrafficRecorder struct{}
+
+func (prometheusTrafficRecorder) AddWireBytes(operation, direction string, bytes int64) {
+	networkWireBytesTotal.WithLabelValues(operation, direction).Add(float64(bytes))
+}
+
+func (prometheusTrafficRecorder) IncRequest(operation, result string) {
+	networkRequestsTotal.WithLabelValues(operation, result).Inc()
+}
 
 var (
 	fCouchDBUsername = flag.String("couchdb-username", "", "CouchDB username")
@@ -261,6 +290,8 @@ func init() {
 		localLastSyncedSequenceID,
 		upstreamDocumentCount,
 		upstreamSequenceID,
+		networkWireBytesTotal,
+		networkRequestsTotal,
 		metadataProxyErrors,
 		webhooks.WebhookCallsTotal,
 		webhooks.WebhookRetriesTotal,
@@ -281,7 +312,8 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	var npmOpts []npm.ClientOpt
+	trafficRecorder := prometheusTrafficRecorder{}
+	npmOpts := []npm.ClientOpt{npm.WithTrafficRecorder(trafficRecorder)}
 	if *fRegistryProxyFile != "" {
 		proxy, err := internal.LoadProxyList(*fRegistryProxyFile, *fRegistryProxyCooldown, metadataProxyErrors)
 		if err != nil {
@@ -289,7 +321,7 @@ func main() {
 		}
 
 		npmOpts = append(npmOpts, npm.WithRegistryHTTPClient(&http.Client{
-			Transport: proxy,
+			Transport: internal.MeterProxyTransport(proxy, npm.TrafficOperationMetadata, trafficRecorder),
 			Timeout:   10 * time.Second,
 		}))
 	}
@@ -300,7 +332,7 @@ func main() {
 		}
 
 		npmOpts = append(npmOpts, npm.WithDownloadsHTTPClient(&http.Client{
-			Transport: proxy,
+			Transport: internal.MeterProxyTransport(proxy, npm.TrafficOperationDownloadCounts, trafficRecorder),
 			Timeout:   10 * time.Second,
 		}))
 	}
