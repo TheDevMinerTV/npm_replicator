@@ -1367,7 +1367,7 @@
           "refId": "LastMonth"
         }
       ],
-      "title": "Total downloads (sum of replicated packages)",
+      "title": "Combined download counts",
       "type": "stat"
     },
     {
