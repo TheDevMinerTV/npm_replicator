@@ -32,6 +32,7 @@ services:
       - --couchdb-password=<COUCHDB_PASSWORD>
       - --couchdb-database=registry
       - --log-level=info
+      - --metrics-listen-addr=:50111
 
 networks:
   web_default:
