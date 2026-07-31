@@ -26,6 +26,11 @@ services:
 
   replicator:
     build: ghcr.io/thedevminertv/npm-replicator:latest
+    # Published so node1's traefik can reach /health over the wireguard link;
+    # the status page cannot route to this subnet directly. Serves /metrics on
+    # the same port, so keep this host internal.
+    ports:
+      - "50111:50111"
     command:
       - --couchdb-url=<COUCHDB_URL>
       - --couchdb-username=<COUCHDB_USERNAME>

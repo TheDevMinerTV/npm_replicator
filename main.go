@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -33,6 +34,60 @@ type stringSlice []string
 
 func (s *stringSlice) String() string         { return "" }
 func (s *stringSlice) Set(value string) error { *s = append(*s, value); return nil }
+
+// lastChangeAt is the unix time of the most recent change applied from the
+// changes feed. Zero until the first one lands. Reported by /health so an
+// external status page can tell a stalled replicator from a working one.
+var lastChangeAt atomic.Int64
+
+// healthHandler reports whether replication can still make progress.
+//
+// The verdict is CouchDB reachability alone, because that is the dependency
+// whose loss stops replication dead. Change staleness is reported but not
+// failed on: a quiet hour on the npm changes feed is not an outage, and paging
+// on it would train everyone to ignore this endpoint.
+func healthHandler(client *kivik.Client, tracker *Tracker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		type response struct {
+			Status        string `json:"status"`
+			CouchDB       string `json:"couchdb"`
+			CouchDBError  string `json:"couchdb_error,omitempty"`
+			LastSyncedSeq int64  `json:"last_synced_seq"`
+			// Null until the first change of this process's lifetime is applied.
+			LastChangeAgeSeconds *int64 `json:"last_change_age_seconds"`
+		}
+
+		body := response{
+			Status:        "ok",
+			CouchDB:       "ok",
+			LastSyncedSeq: tracker.LastSeq(),
+		}
+
+		if at := lastChangeAt.Load(); at > 0 {
+			age := time.Now().Unix() - at
+			body.LastChangeAgeSeconds = &age
+		}
+
+		code := http.StatusOK
+		if _, err := client.Ping(ctx); err != nil {
+			code = http.StatusServiceUnavailable
+			body.Status = "unhealthy"
+			body.CouchDB = "unreachable"
+			body.CouchDBError = err.Error()
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(code)
+
+		if err := json.NewEncoder(w).Encode(body); err != nil {
+			log.Error().Err(err).Msg("Failed to write health response")
+		}
+	}
+}
 
 var (
 	localDBCompactionRunning = prometheus.NewGauge(
@@ -369,6 +424,7 @@ func main() {
 
 	httpMux := http.NewServeMux()
 	httpMux.Handle("/metrics", promhttp.Handler())
+	httpMux.HandleFunc("/health", healthHandler(couchdbClient, tracker))
 	httpServer := &http.Server{
 		Addr:    *fMetricsListenAddr,
 		Handler: httpMux,
@@ -534,6 +590,7 @@ func main() {
 
 					tracker.NewLastSeenSeq(change.Seq)
 					localLastSyncedSequenceID.Set(float64(change.Seq))
+					lastChangeAt.Store(time.Now().Unix())
 				}
 			}
 		}
