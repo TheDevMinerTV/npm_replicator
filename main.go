@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -419,7 +420,7 @@ func main() {
 		LastSeenSeq: 0,
 	})
 	if err != nil {
-		panic(err)
+		log.Fatal().Err(err).Str("file", *fTrackerFile).Msg("Failed to open tracker file")
 	}
 	defer tracker.Close()
 	log.Info().Msg("Tracker is ready")
@@ -476,12 +477,6 @@ func main() {
 	})
 
 	wg.Go(func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Error().Interface("recovered", r).Msg("recovered from panic in changestream fetcher")
-			}
-		}()
-
 		ticker := time.Tick(*fChangestreamFetchInterval)
 		log.Info().
 			Dur("interval", *fChangestreamFetchInterval).
@@ -494,106 +489,7 @@ func main() {
 				return
 
 			case <-ticker:
-				eventCountDifference := _upstreamSequenceID - tracker.LastSeq()
-				if eventCountDifference < int64(*fChangestreamBatchSize) {
-					log.Trace().
-						Int64("event_count_difference", eventCountDifference).
-						Int("required_difference", *fChangestreamBatchSize).
-						Msg("not fetching changes, because there are too few changes from upstream")
-					continue
-				}
-
-				changes, err := npmClient.Changes(ctx, tracker.LastSeq(), *fChangestreamBatchSize)
-				if err != nil {
-					log.Panic().Err(err).Msg("could not fetch replicator changes from upstream")
-				}
-
-				for _, change := range changes.Results {
-					// TODO: this should probably be done smarter
-					upstreamRev := change.Changes[0].Rev
-
-					log := log.With().
-						Str("package_id", change.ID).
-						Int64("sequence_id", change.Seq).
-						Str("upstream_rev", upstreamRev).
-						Logger()
-
-					var pkg replicator.RegistryPackage
-
-					existingDoc := db.Get(ctx, change.ID)
-					var docExists bool
-					if err := existingDoc.Err(); err != nil {
-						var httpErr *chttp.HTTPError
-						if errors.As(err, &httpErr) && httpErr.HTTPStatus() == http.StatusNotFound {
-							log.Trace().
-								Str("package_id", change.ID).
-								Msg("Document not found in existing DB")
-							docExists = false
-						} else {
-							log.Panic().Err(err).Msg("failed to get existing document")
-						}
-					} else {
-						docExists = true
-					}
-
-					if change.Deleted {
-						if docExists {
-							existingRev, err := existingDoc.Rev()
-							if err != nil {
-								log.Panic().Err(err).Msg("failed to get existing revision")
-							}
-
-							// background context to make sure all of these are done before actually allowing the goroutine to exit
-							localRev, err := db.Delete(context.Background(), change.ID, existingRev)
-							if err != nil {
-								log.Panic().Err(err).Msg("Could not delete replicator document")
-							}
-
-							log.Debug().
-								Str("local_rev", localRev).
-								Msg("deleted doc in CouchDB")
-						} else {
-							log.Trace().Msg("not deleting doc, because it doesn't exist")
-						}
-					} else {
-						if err := existingDoc.ScanDoc(&pkg); err != nil {
-							var httpErr *chttp.HTTPError
-							if errors.As(err, &httpErr) && httpErr.HTTPStatus() == http.StatusNotFound {
-								// it's fine
-							} else {
-								log.Panic().Err(err).Msg("failed to scan document")
-							}
-						} else {
-							log.Trace().Str("old_upstream_rev", pkg.Replicator.UpstreamRev).Msg("Preexisting document found")
-						}
-
-						pkg.Replicator.UpstreamRev = upstreamRev
-
-						// background context to make sure all of these are done before actually allowing the goroutine to exit
-						localRev, err := db.Put(context.Background(), change.ID, pkg)
-						if err != nil {
-							log.Error().Err(err).Msg("Could not update replicator document")
-							break
-						}
-
-						log.Debug().
-							Str("local_rev", localRev).
-							Msg("updated doc in CouchDB")
-
-						if *fWebhooksEnabled {
-							payload, err := json.Marshal(webhooks.NewChangestreamUpdatedData(pkg))
-							if err != nil {
-								log.Error().Err(err).Str("package", change.ID).Msg("Failed to marshal webhook payload")
-							} else {
-								webhooks.CallWebhooksAsync(ctx, change.ID, payload)
-							}
-						}
-					}
-
-					tracker.NewLastSeenSeq(change.Seq)
-					localLastSyncedSequenceID.Set(float64(change.Seq))
-					lastChangeAt.Store(time.Now().Unix())
-				}
+				applyChangestreamBatch(ctx, npmClient, db, tracker)
 			}
 		}
 	})
@@ -771,7 +667,7 @@ func main() {
 				fetcherWg.Wait()
 
 				if statusView.Err() != nil {
-					log.Panic().Err(statusView.Err()).Msg("failed to fetch replicator document statuses")
+					log.Error().Err(statusView.Err()).Msg("failed to fetch replicator document statuses")
 				}
 			}
 		}
@@ -903,7 +799,139 @@ func main() {
 	wg.Wait()
 }
 
-var _upstreamSequenceID int64 = 0
+var _upstreamSequenceID atomic.Int64
+
+// applyChangestreamBatch fetches one batch of upstream changes and applies it
+// locally. Errors abort the rest of the batch so the tracker never advances
+// past a change that wasn't applied and the next tick retries from the same
+// sequence.
+func applyChangestreamBatch(ctx context.Context, npmClient *npm.Client, db *kivik.DB, tracker *Tracker) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().
+				Interface("recovered", r).
+				Str("stack", string(debug.Stack())).
+				Msg("recovered from panic in changestream fetcher")
+		}
+	}()
+
+	eventCountDifference := _upstreamSequenceID.Load() - tracker.LastSeq()
+	if eventCountDifference < int64(*fChangestreamBatchSize) {
+		log.Trace().
+			Int64("event_count_difference", eventCountDifference).
+			Int("required_difference", *fChangestreamBatchSize).
+			Msg("not fetching changes, because there are too few changes from upstream")
+		return
+	}
+
+	changes, err := npmClient.Changes(ctx, tracker.LastSeq(), *fChangestreamBatchSize)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+
+		log.Error().Err(err).Msg("could not fetch replicator changes from upstream")
+		return
+	}
+
+	for _, change := range changes.Results {
+		log := log.With().
+			Str("package_id", change.ID).
+			Int64("sequence_id", change.Seq).
+			Logger()
+
+		if len(change.Changes) == 0 {
+			// still advance, or every following fetch replays this change forever
+			log.Warn().Msg("change has no revisions, skipping")
+
+			tracker.NewLastSeenSeq(change.Seq)
+			localLastSyncedSequenceID.Set(float64(change.Seq))
+			continue
+		}
+
+		// TODO: this should probably be done smarter
+		upstreamRev := change.Changes[0].Rev
+		log = log.With().Str("upstream_rev", upstreamRev).Logger()
+
+		var pkg replicator.RegistryPackage
+
+		existingDoc := db.Get(ctx, change.ID)
+		var docExists bool
+		if err := existingDoc.Err(); err != nil {
+			var httpErr *chttp.HTTPError
+			if errors.As(err, &httpErr) && httpErr.HTTPStatus() == http.StatusNotFound {
+				log.Trace().Msg("Document not found in existing DB")
+				docExists = false
+			} else {
+				log.Error().Err(err).Msg("failed to get existing document, aborting batch")
+				return
+			}
+		} else {
+			docExists = true
+		}
+
+		if change.Deleted {
+			if docExists {
+				existingRev, err := existingDoc.Rev()
+				if err != nil {
+					log.Error().Err(err).Msg("failed to get existing revision, aborting batch")
+					return
+				}
+
+				// background context to make sure all of these are done before actually allowing the goroutine to exit
+				localRev, err := db.Delete(context.Background(), change.ID, existingRev)
+				if err != nil {
+					log.Error().Err(err).Msg("Could not delete replicator document, aborting batch")
+					return
+				}
+
+				log.Debug().
+					Str("local_rev", localRev).
+					Msg("deleted doc in CouchDB")
+			} else {
+				log.Trace().Msg("not deleting doc, because it doesn't exist")
+			}
+		} else {
+			if err := existingDoc.ScanDoc(&pkg); err != nil {
+				var httpErr *chttp.HTTPError
+				if errors.As(err, &httpErr) && httpErr.HTTPStatus() == http.StatusNotFound {
+					// it's fine
+				} else {
+					log.Error().Err(err).Msg("failed to scan document, aborting batch")
+					return
+				}
+			} else {
+				log.Trace().Str("old_upstream_rev", pkg.Replicator.UpstreamRev).Msg("Preexisting document found")
+			}
+
+			pkg.Replicator.UpstreamRev = upstreamRev
+
+			// background context to make sure all of these are done before actually allowing the goroutine to exit
+			localRev, err := db.Put(context.Background(), change.ID, pkg)
+			if err != nil {
+				log.Error().Err(err).Msg("Could not update replicator document, aborting batch")
+				return
+			}
+
+			log.Debug().
+				Str("local_rev", localRev).
+				Msg("updated doc in CouchDB")
+
+			if *fWebhooksEnabled {
+				payload, err := json.Marshal(webhooks.NewChangestreamUpdatedData(pkg))
+				if err != nil {
+					log.Error().Err(err).Str("package", change.ID).Msg("Failed to marshal webhook payload")
+				} else {
+					webhooks.CallWebhooksAsync(ctx, change.ID, payload)
+				}
+			}
+		}
+
+		tracker.NewLastSeenSeq(change.Seq)
+		localLastSyncedSequenceID.Set(float64(change.Seq))
+		lastChangeAt.Store(time.Now().Unix())
+	}
+}
 
 func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 	info, err := npmClient.Info(ctx)
@@ -914,7 +942,7 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 
 	upstreamDocumentCount.Set(float64(info.DocCount))
 	upstreamSequenceID.Set(float64(info.UpdateSeq))
-	_upstreamSequenceID = info.UpdateSeq
+	_upstreamSequenceID.Store(info.UpdateSeq)
 
 	stats, err := db.Stats(ctx)
 	if err != nil {
