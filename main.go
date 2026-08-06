@@ -278,15 +278,17 @@ var (
 	fBatchedMetadataUpdateInterval = flag.Duration("metadata-update-interval", 15*time.Second, "Interval between batched metadata updates")
 	fMetadataUpdateBatchSize       = flag.Int("metadata-update-batch-size", 10, "Batch size for metadata updates")
 
-	fRegistryProxyFile     = flag.String("registry-proxy-file", "", "Path to file with proxy URLs (one per line) for the registry client")
-	fRegistryProxyCooldown = flag.Duration("registry-proxy-cooldown", 30*time.Second, "Cooldown duration for downed proxies before retrying")
+	fRegistryProxyFile        = flag.String("registry-proxy-file", "", "Path to file with proxy URLs (one per line) for the registry client")
+	fRegistryProxyCooldown    = flag.Duration("registry-proxy-cooldown", 30*time.Second, "Cooldown duration for downed proxies before retrying")
+	fRegistryProxyNoDownMarks = flag.Bool("registry-proxy-no-down-marks", false, "Never mark registry proxies as down; keep them in rotation regardless of errors")
 
-	fDownloadsEnabled         = flag.Bool("downloads-enabled", false, "Enable download count fetching")
-	fDownloadsUpdateInterval  = flag.Duration("downloads-update-interval", 60*time.Second, "Interval between download count update batches")
-	fDownloadsUpdateBatchSize = flag.Int("downloads-update-batch-size", 10, "Batch size for download count updates")
-	fDownloadsStaleness       = flag.Duration("downloads-staleness", 7*24*time.Hour, "How old download counts can be before re-fetching")
-	fDownloadsProxyFile       = flag.String("downloads-proxy-file", "", "Path to file with proxy URLs (one per line) for the downloads client")
-	fDownloadsProxyCooldown   = flag.Duration("downloads-proxy-cooldown", 30*time.Second, "Cooldown duration for downed proxies before retrying")
+	fDownloadsEnabled          = flag.Bool("downloads-enabled", false, "Enable download count fetching")
+	fDownloadsUpdateInterval   = flag.Duration("downloads-update-interval", 60*time.Second, "Interval between download count update batches")
+	fDownloadsUpdateBatchSize  = flag.Int("downloads-update-batch-size", 10, "Batch size for download count updates")
+	fDownloadsStaleness        = flag.Duration("downloads-staleness", 7*24*time.Hour, "How old download counts can be before re-fetching")
+	fDownloadsProxyFile        = flag.String("downloads-proxy-file", "", "Path to file with proxy URLs (one per line) for the downloads client")
+	fDownloadsProxyCooldown    = flag.Duration("downloads-proxy-cooldown", 30*time.Second, "Cooldown duration for downed proxies before retrying")
+	fDownloadsProxyNoDownMarks = flag.Bool("downloads-proxy-no-down-marks", false, "Never mark downloads proxies as down; keep them in rotation regardless of errors")
 
 	fWebhooksEnabled = flag.Bool("webhooks-enabled", false, "Enable webhook notifications for package updates")
 
@@ -370,7 +372,7 @@ func main() {
 	trafficRecorder := prometheusTrafficRecorder{}
 	npmOpts := []npm.ClientOpt{npm.WithTrafficRecorder(trafficRecorder)}
 	if *fRegistryProxyFile != "" {
-		proxy, err := internal.LoadProxyList(*fRegistryProxyFile, *fRegistryProxyCooldown, metadataProxyErrors)
+		proxy, err := internal.LoadProxyList(*fRegistryProxyFile, *fRegistryProxyCooldown, *fRegistryProxyNoDownMarks, metadataProxyErrors)
 		if err != nil {
 			log.Fatal().Err(err).Str("file", *fRegistryProxyFile).Msg("Failed to load registry proxy list")
 		}
@@ -381,7 +383,7 @@ func main() {
 		}))
 	}
 	if *fDownloadsProxyFile != "" {
-		proxy, err := internal.LoadProxyList(*fDownloadsProxyFile, *fDownloadsProxyCooldown, downloadsProxyErrors)
+		proxy, err := internal.LoadProxyList(*fDownloadsProxyFile, *fDownloadsProxyCooldown, *fDownloadsProxyNoDownMarks, downloadsProxyErrors)
 		if err != nil {
 			log.Fatal().Err(err).Str("file", *fDownloadsProxyFile).Msg("Failed to load proxy list")
 		}

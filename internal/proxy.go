@@ -15,7 +15,7 @@ import (
 	xproxy "golang.org/x/net/proxy"
 )
 
-func LoadProxyList(path string, cooldown time.Duration, errorCounter *prometheus.CounterVec) (*roundRobinTransport, error) {
+func LoadProxyList(path string, cooldown time.Duration, disableOfflineMarking bool, errorCounter *prometheus.CounterVec) (*roundRobinTransport, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -49,7 +49,12 @@ func LoadProxyList(path string, cooldown time.Duration, errorCounter *prometheus
 		return nil, err
 	}
 
-	return &roundRobinTransport{proxies: proxyStates, cooldown: cooldown, errorCounter: errorCounter}, nil
+	return &roundRobinTransport{
+		proxies:               proxyStates,
+		cooldown:              cooldown,
+		disableOfflineMarking: disableOfflineMarking,
+		errorCounter:          errorCounter,
+	}, nil
 }
 
 type proxyState struct {
@@ -59,35 +64,51 @@ type proxyState struct {
 }
 
 type roundRobinTransport struct {
-	proxies      []*proxyState
-	idx          atomic.Uint64
-	cooldown     time.Duration
-	errorCounter *prometheus.CounterVec
+	proxies  []*proxyState
+	idx      atomic.Uint64
+	cooldown time.Duration
+	// disableOfflineMarking keeps failing proxies in rotation instead of putting
+	// them on cooldown. Useful when the list points at a single load balancer
+	// that fans out to many upstream proxies itself.
+	disableOfflineMarking bool
+	errorCounter          *prometheus.CounterVec
 }
 
 func (rr *roundRobinTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	n := uint64(len(rr.proxies))
 	start := rr.idx.Add(1) - 1
 
+	var lastErr error
 	for offset := range n {
 		ps := rr.proxies[(start+offset)%n]
 
-		if downUntil := ps.downUntil.Load(); downUntil != 0 {
-			if time.Now().Unix() < downUntil {
-				continue // still in cooldown
+		if !rr.disableOfflineMarking {
+			if downUntil := ps.downUntil.Load(); downUntil != 0 {
+				if time.Now().Unix() < downUntil {
+					continue // still in cooldown
+				}
+				ps.downUntil.Store(0) // cooldown expired, mark healthy
 			}
-			ps.downUntil.Store(0) // cooldown expired, mark healthy
 		}
 
 		resp, err := ps.transport.RoundTrip(req)
 		if err != nil {
-			ps.downUntil.Store(time.Now().Add(rr.cooldown).Unix())
+			lastErr = err
 			rr.errorCounter.With(prometheus.Labels{"proxy": ps.name}).Inc()
-			log.Warn().Err(err).Str("proxy", ps.name).Dur("cooldown", rr.cooldown).Msg("proxy error, marking down")
+			if rr.disableOfflineMarking {
+				log.Warn().Err(err).Str("proxy", ps.name).Msg("proxy error")
+			} else {
+				ps.downUntil.Store(time.Now().Add(rr.cooldown).Unix())
+				log.Warn().Err(err).Str("proxy", ps.name).Dur("cooldown", rr.cooldown).Msg("proxy error, marking down")
+			}
 			continue
 		}
 
 		return resp, nil
+	}
+
+	if lastErr != nil {
+		return nil, fmt.Errorf("all proxies failed: %w", lastErr)
 	}
 
 	return nil, fmt.Errorf("all proxies are down")
