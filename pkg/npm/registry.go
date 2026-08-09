@@ -215,6 +215,194 @@ type Version struct {
 	DevDependencies map[string]string `json:"devDependencies,omitempty"`
 	Engines         Engines           `json:"engines,omitempty"`
 	Bin             Bin               `json:"bin,omitempty"`
+
+	// Module resolution fields, stored so consumers can re-derive their own
+	// classification; DetectPackageType condenses them into a PackageType.
+	// Normalize canonicalizes all four.
+	Type    LooseString `json:"type,omitempty"`
+	Main    Paths       `json:"main,omitempty"`
+	Module  LooseString `json:"module,omitempty"`
+	Exports Exports     `json:"exports,omitempty"`
+}
+
+// Paths is a package.json field documented as a single module path but
+// published as an array often enough that keeping only one entry would lose
+// real data. Every spelling decodes to a slice, so consumers never branch on
+// shape.
+type Paths []string
+
+func (p *Paths) UnmarshalJSON(data []byte) error {
+	{
+		// try decoding as string
+		var t string
+		if err := json.Unmarshal(data, &t); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			if t != "" {
+				*p = Paths{t}
+			}
+
+			return nil
+		}
+	}
+
+	{
+		// try decoding as an array, keeping the entries that are strings; a
+		// stray null or number in there should not cost us the rest
+		var t []any
+		if err := json.Unmarshal(data, &t); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			paths := make(Paths, 0, len(t))
+			for _, entry := range t {
+				if s, ok := entry.(string); ok && s != "" {
+					paths = append(paths, s)
+				}
+			}
+
+			if len(paths) > 0 {
+				*p = paths
+			}
+
+			return nil
+		}
+	}
+
+	// numbers, booleans, objects: nothing sensible to keep
+	*p = nil
+
+	return nil
+}
+
+// Normalize canonicalizes every entry and drops the ones that collapse onto
+// each other, so "index.js" and "./index.js" do not both end up stored.
+func (p *Paths) Normalize() {
+	if len(*p) == 0 {
+		return
+	}
+
+	normalized := make(Paths, 0, len(*p))
+	seen := make(map[string]struct{}, len(*p))
+
+	for _, path := range *p {
+		path = normalizePath(path)
+		if path == "" {
+			continue
+		}
+
+		if _, ok := seen[path]; ok {
+			continue
+		}
+
+		seen[path] = struct{}{}
+		normalized = append(normalized, path)
+	}
+
+	if len(normalized) == 0 {
+		*p = nil
+		return
+	}
+
+	*p = normalized
+}
+
+// LooseString is a string field that tolerates the non-string values found in
+// the wild ("main": ["./index.js"], "main": null, "main": 0). Anything that
+// isn't usable decodes to the empty string instead of failing the whole
+// packument, which would otherwise flag the package with hasJSONParseError.
+type LooseString string
+
+func (s *LooseString) UnmarshalJSON(data []byte) error {
+	{
+		// try decoding as string
+		var t string
+		if err := json.Unmarshal(data, &t); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			*s = LooseString(t)
+			return nil
+		}
+	}
+
+	{
+		// try decoding as string array, keeping the first entry
+		var t []string
+		if err := json.Unmarshal(data, &t); err != nil {
+			var jsonErr *json.UnmarshalTypeError
+			if !errors.As(err, &jsonErr) {
+				return err
+			}
+		} else {
+			if len(t) > 0 {
+				*s = LooseString(t[0])
+			}
+
+			return nil
+		}
+	}
+
+	// numbers, booleans, objects: nothing sensible to keep
+	*s = ""
+
+	return nil
+}
+
+// Normalize canonicalizes the version in place so that every document written
+// to the database has the same shape no matter which of npm's many accepted
+// spellings the publisher used. It is a no-op on a zero version, which is what
+// a package without a usable "latest" tag decodes to.
+func (v *Version) Normalize(pkgName string) {
+	if v.Version == "" {
+		return
+	}
+
+	// resolve a bare-string bin to its unscoped-name command
+	v.Bin.Normalize(pkgName)
+
+	v.Type = LooseString(normalizeModuleType(string(v.Type)))
+	v.Module = LooseString(normalizePath(string(v.Module)))
+	v.Main.Normalize()
+	v.Exports.Normalize()
+}
+
+// normalizeModuleType lower-cases the "type" field and makes npm's default
+// explicit, so a view never has to spell out (doc.type || "commonjs").
+// Values other than module/commonjs are kept verbatim rather than coerced —
+// they are a small but real signal that a package.json is broken.
+func normalizeModuleType(moduleType string) string {
+	moduleType = strings.ToLower(strings.TrimSpace(moduleType))
+	if moduleType == "" {
+		return "commonjs"
+	}
+
+	return moduleType
+}
+
+// normalizePath canonicalizes a module path to the relative "./x" form npm
+// resolves it as. Windows-authored packages ship backslashes, and the leading
+// "./" is optional in package.json but conventional everywhere else.
+func normalizePath(path string) string {
+	path = strings.ReplaceAll(strings.TrimSpace(path), "\\", "/")
+	if path == "" || path == "." || path == ".." {
+		return path
+	}
+
+	// already relative, absolute, or a URL-ish value we should not touch
+	if strings.HasPrefix(path, "./") || strings.HasPrefix(path, "../") ||
+		strings.HasPrefix(path, "/") || strings.Contains(path, "://") {
+		return path
+	}
+
+	return "./" + path
 }
 
 // Bin represents the npm package "bin" field, normalized into a map of command -> script path

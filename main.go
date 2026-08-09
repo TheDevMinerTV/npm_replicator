@@ -606,6 +606,10 @@ func main() {
 
 							}
 
+							// canonicalize before storing, so that every document has
+							// the same shape regardless of how it was published
+							version.Normalize(packageID)
+
 							// generate new package document so that we don't have stale information in there
 							pkg = replicator.RegistryPackage{
 								Version:   version,
@@ -615,13 +619,9 @@ func main() {
 									UpstreamRev:          pkg.Replicator.UpstreamRev,
 									MetadataRev:          &pkg.Replicator.UpstreamRev,
 									DownloadsLastUpdated: pkg.Replicator.DownloadsLastUpdated,
+									PackageType:          version.DetectPackageType(),
 									HasInvalidTag:        hasInvalidTag,
 								},
-							}
-
-							// resolve a bare-string bin to its unscoped-name command
-							if pkg.Bin != nil {
-								pkg.Bin.Normalize(packageID)
 							}
 
 							if pkg.Dist.Tarball != "" {
