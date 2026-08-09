@@ -557,29 +557,49 @@ type Keywords []string
 
 func (k Keywords) Len() int { return len(k) }
 
-func (k *Keywords) UnmarshalJSON(data []byte) error {
-	{
-		// try decoding as string
-		var w string
-		if err := json.Unmarshal(data, &w); err != nil {
-			var jsonErr *json.UnmarshalTypeError
-			if !errors.As(err, &jsonErr) {
-				return err
-			}
-		} else {
-			*k = Keywords{w}
-			return nil
-		}
-	}
+// maxKeywordDepth bounds the flattening walk. Real packages nest one level at
+// worst; the limit only exists so a pathological document cannot blow the stack.
+const maxKeywordDepth = 8
 
-	var w []string
-	if err := json.Unmarshal(data, &w); err != nil {
+func (k *Keywords) UnmarshalJSON(data []byte) error {
+	// Keywords show up as a bare string, as the documented array of strings,
+	// and as an array with arrays inside it:
+	//
+	//	"keywords": ["web components", "block link", ["wcd"]]
+	//
+	// Decoding the whole thing as a tree and flattening covers all three, and
+	// drops the numbers and objects that used to fail the entire packument.
+	var node any
+	if err := json.Unmarshal(data, &node); err != nil {
 		return err
 	}
 
-	*k = w
+	var flattened Keywords
+	flattenKeywords(node, 0, &flattened)
+
+	*k = flattened
 
 	return nil
+}
+
+func flattenKeywords(node any, depth int, out *Keywords) {
+	if depth > maxKeywordDepth {
+		return
+	}
+
+	switch n := node.(type) {
+	case string:
+		if keyword := strings.TrimSpace(n); keyword != "" {
+			*out = append(*out, keyword)
+		}
+
+	case []any:
+		for _, value := range n {
+			flattenKeywords(value, depth+1, out)
+		}
+	}
+
+	// numbers, booleans, objects and null carry nothing usable as a keyword
 }
 
 type DeprecationInfo struct {

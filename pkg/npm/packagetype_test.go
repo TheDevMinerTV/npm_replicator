@@ -396,3 +396,75 @@ func TestNormalizeSkipsZeroVersion(t *testing.T) {
 		t.Errorf("expected type to be omitted, got %s", out)
 	}
 }
+
+func TestKeywordsFlattening(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want []string
+	}{
+		{
+			name: "documented array of strings",
+			json: `{"keywords":["a","b"]}`,
+			want: []string{"a", "b"},
+		},
+		{
+			name: "bare string",
+			json: `{"keywords":"solo"}`,
+			want: []string{"solo"},
+		},
+		{
+			name: "nested array is flattened",
+			json: `{"keywords":["web components","block link","a11y",["wcd"]]}`,
+			want: []string{"web components", "block link", "a11y", "wcd"},
+		},
+		{
+			name: "deeply nested",
+			json: `{"keywords":[["a",["b",["c"]]],"d"]}`,
+			want: []string{"a", "b", "c", "d"},
+		},
+		{
+			name: "non-string elements are dropped, not fatal",
+			json: `{"keywords":["a",1,null,true,{"b":2},"c"]}`,
+			want: []string{"a", "c"},
+		},
+		{
+			name: "blank entries dropped and values trimmed",
+			json: `{"keywords":["  a  ","","   "]}`,
+			want: []string{"a"},
+		},
+		{
+			name: "empty array",
+			json: `{"keywords":[]}`,
+			want: nil,
+		},
+		{
+			name: "null",
+			json: `{"keywords":null}`,
+			want: nil,
+		},
+		{
+			name: "object is dropped, not fatal",
+			json: `{"keywords":{"nope":true}}`,
+			want: nil,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var v Version
+			if err := json.Unmarshal([]byte(test.json), &v); err != nil {
+				t.Fatalf("unmarshal failed: %v", err)
+			}
+
+			if len(v.Keywords) != len(test.want) {
+				t.Fatalf("Keywords = %q, want %q", v.Keywords, test.want)
+			}
+			for i := range test.want {
+				if v.Keywords[i] != test.want[i] {
+					t.Fatalf("Keywords = %q, want %q", v.Keywords, test.want)
+				}
+			}
+		})
+	}
+}
