@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -232,6 +233,16 @@ var (
 		[]string{"proxy"},
 	)
 
+	packageTypeCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "packages",
+			Name:      "type_count",
+			Help:      "Number of packages by module kind, bucketed by the digit count of their weekly downloads (0 = none, 1 = 1-9, 4 = 1000-9999)",
+		},
+		[]string{"kind", "downloads_digits"},
+	)
+
 	tarballSizeUpdatedTotal = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: "npm_replicator",
@@ -361,6 +372,7 @@ func init() {
 		downloadsDocumentCount,
 		downloadsCountSum,
 		downloadsProxyErrors,
+		packageTypeCount,
 		tarballSizeUpdatedTotal,
 		tarballSizeErrorsTotal,
 	)
@@ -799,6 +811,11 @@ func main() {
 	wg.Wait()
 }
 
+// maxDownloadDigits is the widest weekly-download bucket _design/esm can emit
+// that is worth pre-seeding. The most downloaded package on npm sits at nine
+// digits, so ten leaves room without inventing empty series.
+const maxDownloadDigits = 10
+
 var _upstreamSequenceID atomic.Int64
 
 // applyChangestreamBatch fetches one batch of upstream changes and applies it
@@ -1080,5 +1097,75 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 		downloadsCountSum.With(prometheus.Labels{"period": "last-week"}).Set(float64(sums[1]))
 		downloadsCountSum.With(prometheus.Labels{"period": "last-month"}).Set(float64(sums[2]))
 		downloadsCountSum.With(prometheus.Labels{"period": "last-week-version"}).Set(float64(sums[3]))
+	}
+
+	// last, because this index is the newest and a cold rebuild makes the query
+	// fail for a while; the metrics above should not be held hostage to it
+	{
+		kindView := db.Query(ctx, "_design/esm", "by_kind", kivik.Param("group_level", "2"))
+		if err := kindView.Err(); err != nil {
+			log.Error().Err(err).Msg("could not fetch package type count")
+			return
+		}
+
+		// collected first and published only once the whole view has been read:
+		// publishing as we go would leave a half-filled set of gauges behind if
+		// the read fails part way, which reads as a genuine drop to zero
+		type packageTypeKey struct {
+			kind   string
+			digits int
+		}
+		counts := make(map[packageTypeKey]int)
+
+		for kindView.Next() {
+			// the view emits [downloadDigits, kind]
+			var key [2]any
+			if err := kindView.ScanKey(&key); err != nil {
+				log.Error().Err(err).Msg("failed to read package type key")
+				return
+			}
+
+			digits, digitsOK := key[0].(float64)
+			kind, kindOK := key[1].(string)
+			if !digitsOK || !kindOK {
+				log.Warn().Interface("key", key).Msg("malformed package type key")
+				continue
+			}
+
+			var count int
+			if err := kindView.ScanValue(&count); err != nil {
+				log.Error().Err(err).Msg("failed to read package type value")
+				return
+			}
+
+			counts[packageTypeKey{kind: kind, digits: int(digits)}] = count
+		}
+		if kindView.Err() != nil {
+			log.Error().Err(kindView.Err()).Msg("failed to fetch package type counts")
+			return
+		}
+
+		// seed every known combination, or a bucket that empties out keeps
+		// reporting whatever it last held instead of dropping to zero
+		for _, kind := range npm.PackageTypes {
+			for digits := 0; digits <= maxDownloadDigits; digits++ {
+				packageTypeCount.With(prometheus.Labels{
+					"kind":             string(kind),
+					"downloads_digits": strconv.Itoa(digits),
+				}).Set(float64(counts[packageTypeKey{kind: string(kind), digits: digits}]))
+			}
+		}
+
+		// anything the view emitted outside those bounds still gets reported
+		for key, count := range counts {
+			if slices.Contains(npm.PackageTypes, npm.PackageType(key.kind)) && key.digits <= maxDownloadDigits {
+				continue
+			}
+
+			packageTypeCount.With(prometheus.Labels{
+				"kind":             key.kind,
+				"downloads_digits": strconv.Itoa(key.digits),
+			}).Set(float64(count))
+		}
 	}
 }

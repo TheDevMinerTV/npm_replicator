@@ -23,6 +23,14 @@ const (
 	PackageTypeCJS PackageType = "cjs"
 )
 
+// PackageTypes lists every kind a document can report.
+var PackageTypes = []PackageType{
+	PackageTypeESM,
+	PackageTypeDual,
+	PackageTypeCJS,
+	PackageTypeUnknown,
+}
+
 // maxExportsDepth bounds the exports walk. Real packages nest a handful of
 // levels; the limit only exists so a pathological document cannot blow the
 // stack.
