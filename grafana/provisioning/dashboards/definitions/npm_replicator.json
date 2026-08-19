@@ -941,6 +941,8 @@
             }
           },
           "mappings": [],
+          "max": 1,
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -950,17 +952,15 @@
               }
             ]
           },
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1
+          "unit": "percentunit"
         },
         "overrides": []
       },
       "gridPos": {
-        "x": 0,
-        "y": 23,
+        "h": 8,
         "w": 12,
-        "h": 8
+        "x": 0,
+        "y": 23
       },
       "id": 41,
       "options": {
@@ -1059,10 +1059,10 @@
         "overrides": []
       },
       "gridPos": {
-        "x": 12,
-        "y": 23,
+        "h": 8,
         "w": 8,
-        "h": 8
+        "x": 12,
+        "y": 23
       },
       "id": 42,
       "options": {
@@ -1140,10 +1140,10 @@
         "overrides": []
       },
       "gridPos": {
-        "x": 20,
-        "y": 23,
+        "h": 4,
         "w": 4,
-        "h": 4
+        "x": 20,
+        "y": 23
       },
       "id": 43,
       "options": {
@@ -1203,10 +1203,10 @@
         "overrides": []
       },
       "gridPos": {
-        "x": 20,
-        "y": 27,
+        "h": 4,
         "w": 4,
-        "h": 4
+        "x": 20,
+        "y": 27
       },
       "id": 44,
       "options": {
@@ -1876,6 +1876,68 @@
         "type": "prometheus",
         "uid": "default_prometheus_ds"
       },
+      "description": "sorry npm",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 4,
+        "x": 0,
+        "y": 47
+      },
+      "id": 45,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (direction) (increase(npm_replicator_network_wire_bytes_total[$__range]))",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Total Network Traffic",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "default_prometheus_ds"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1931,9 +1993,9 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
+        "h": 9,
+        "w": 10,
+        "x": 4,
         "y": 47
       },
       "id": 33,
@@ -2026,9 +2088,9 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
+        "h": 9,
+        "w": 10,
+        "x": 14,
         "y": 47
       },
       "id": 34,
@@ -2067,7 +2129,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 55
+        "y": 56
       },
       "id": 35,
       "panels": [],
@@ -2135,7 +2197,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 56
+        "y": 57
       },
       "id": 36,
       "options": {
@@ -2252,7 +2314,7 @@
         "h": 8,
         "w": 8,
         "x": 12,
-        "y": 56
+        "y": 57
       },
       "id": 37,
       "options": {
@@ -2327,7 +2389,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 56
+        "y": 57
       },
       "id": 38,
       "options": {
@@ -2400,7 +2462,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 60
+        "y": 61
       },
       "id": 39,
       "options": {
@@ -2439,7 +2501,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 64
+        "y": 65
       },
       "id": 19,
       "panels": [],
@@ -2478,7 +2540,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 65
+        "y": 66
       },
       "id": 18,
       "options": {
@@ -2543,7 +2605,7 @@
         "h": 5,
         "w": 8,
         "x": 8,
-        "y": 65
+        "y": 66
       },
       "id": 20,
       "options": {
@@ -2608,7 +2670,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 65
+        "y": 66
       },
       "id": 21,
       "options": {
@@ -2647,7 +2709,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 71
       },
       "id": 9,
       "panels": [],
@@ -2682,7 +2744,7 @@
         "h": 5,
         "w": 5,
         "x": 0,
-        "y": 71
+        "y": 72
       },
       "id": 2,
       "interval": "60s",
@@ -2745,7 +2807,7 @@
         "h": 5,
         "w": 5,
         "x": 5,
-        "y": 71
+        "y": 72
       },
       "id": 10,
       "interval": "60s",
@@ -2838,7 +2900,7 @@
         "h": 5,
         "w": 8,
         "x": 10,
-        "y": 71
+        "y": 72
       },
       "id": 28,
       "options": {
@@ -2886,5 +2948,5 @@
   "timezone": "browser",
   "title": "NPM Replicator",
   "uid": "df3ndculyvu2of",
-  "version": 22
+  "version": 26
 }
