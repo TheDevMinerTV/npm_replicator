@@ -25,9 +25,20 @@ type Client struct {
 type ClientOpt func(*clientOptions)
 
 type clientOptions struct {
+	replicateBaseURL    string
+	registryBaseURL     string
 	downloadsHTTPClient *http.Client
 	registryHTTPClient  *http.Client
 	trafficRecorder     httpclient.TrafficRecorder
+}
+
+// WithBaseURLs points the replicate and registry clients somewhere other than
+// npm, for tests that stand in for upstream.
+func WithBaseURLs(replicate, registry string) ClientOpt {
+	return func(o *clientOptions) {
+		o.replicateBaseURL = replicate
+		o.registryBaseURL = registry
+	}
 }
 
 func WithRegistryHTTPClient(c *http.Client) ClientOpt {
@@ -53,7 +64,10 @@ var defaultHeaders = httpclient.WithDefaultHeaders(http.Header{
 })
 
 func New(opts ...ClientOpt) *Client {
-	o := &clientOptions{}
+	o := &clientOptions{
+		replicateBaseURL: ReplicateBaseURL,
+		registryBaseURL:  RegistryBaseURL,
+	}
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -84,8 +98,8 @@ func New(opts ...ClientOpt) *Client {
 	}
 
 	return &Client{
-		replicateClient: httpclient.New(ReplicateBaseURL, defaultHeaders),
-		registryClient:  httpclient.New(RegistryBaseURL, registryOpts...),
+		replicateClient: httpclient.New(o.replicateBaseURL, defaultHeaders),
+		registryClient:  httpclient.New(o.registryBaseURL, registryOpts...),
 		downloadsClient: httpclient.New(DownloadsBaseURL, downloadsOpts...),
 		tarballClient:   httpclient.New("", tarballOpts...),
 	}

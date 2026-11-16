@@ -1,0 +1,16 @@
+{
+  "_id": "_design/resync",
+  "language": "javascript",
+  "views": {
+    "by_id": {
+      "map": "function (doc) {\n  var r = doc.replicator || {};\n  emit(doc._id, [r.upstreamRev || null, !!r.droppedFromFeedAt]);\n}",
+      "options": {
+        "collation": "raw"
+      }
+    },
+    "dropped": {
+      "map": "function (doc) {\n  if (doc.replicator && doc.replicator.droppedFromFeedAt) {\n    emit(doc.replicator.droppedFromFeedAt, null);\n  }\n}",
+      "reduce": "_count"
+    }
+  }
+}

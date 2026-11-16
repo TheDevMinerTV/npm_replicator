@@ -60,6 +60,8 @@ func healthHandler(client *kivik.Client, tracker *Tracker) http.HandlerFunc {
 			LastSyncedSeq int64  `json:"last_synced_seq"`
 			// Null until the first change of this process's lifetime is applied.
 			LastChangeAgeSeconds *int64 `json:"last_change_age_seconds"`
+			// Null until the first resync completes.
+			LastResyncAgeSeconds *int64 `json:"last_resync_age_seconds"`
 		}
 
 		body := response{
@@ -71,6 +73,11 @@ func healthHandler(client *kivik.Client, tracker *Tracker) http.HandlerFunc {
 		if at := lastChangeAt.Load(); at > 0 {
 			age := time.Now().Unix() - at
 			body.LastChangeAgeSeconds = &age
+		}
+
+		if _, _, at := tracker.ResyncState(); at != nil {
+			age := int64(time.Since(*at).Seconds())
+			body.LastResyncAgeSeconds = &age
 		}
 
 		code := http.StatusOK
@@ -251,6 +258,40 @@ var (
 			Help:      "Total number of tarball sizes fetched and stored",
 		},
 	)
+	resyncDocsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "resync",
+			Name:      "docs_total",
+			Help:      "Documents the resync acted on, by action (created, updated, restored, dropped, flaky, drop_aborted, conflict, error)",
+		},
+		[]string{"action"},
+	)
+	resyncPagesTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "resync",
+			Name:      "pages_total",
+			Help:      "Upstream listing pages the resync reconciled",
+		},
+	)
+	resyncLastCompleted = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "resync",
+			Name:      "last_completed_timestamp_seconds",
+			Help:      "Unix time the last resync completed",
+		},
+	)
+	resyncLastDuration = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "npm_replicator",
+			Subsystem: "resync",
+			Name:      "last_duration_seconds",
+			Help:      "Duration of the last completed resync run, since it started or resumed",
+		},
+	)
+
 	tarballSizeErrorsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "npm_replicator",
@@ -287,6 +328,8 @@ var (
 	fChangestreamFetchInterval = flag.Duration("changes-fetch-interval", 10*time.Second, "Interval between changes fetches")
 	fChangestreamBatchSize     = flag.Int("changes-batch-size", 1000, "Batch size for changes fetches")
 
+	fResyncInterval = flag.Duration("resync-interval", 24*time.Hour, "Interval between resyncs against the full upstream listing, which catch packages dropped from the changes feed (disabled if 0)")
+
 	fBatchedMetadataUpdateInterval = flag.Duration("metadata-update-interval", 15*time.Second, "Interval between batched metadata updates")
 	fMetadataUpdateBatchSize       = flag.Int("metadata-update-batch-size", 10, "Batch size for metadata updates")
 
@@ -307,7 +350,9 @@ var (
 	fWebhookAuthorizations stringSlice
 )
 
-func init() {
+// setup parses flags and registers metrics. It isn't init, because flag.Parse
+// there would choke on the flags of a test binary.
+func setup() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 	flag.Var(&fWebhookAuthorizations, "webhook-authorization", "Webhook authorization in format url=token (can be repeated)")
@@ -375,10 +420,16 @@ func init() {
 		packageTypeCount,
 		tarballSizeUpdatedTotal,
 		tarballSizeErrorsTotal,
+		resyncDocsTotal,
+		resyncPagesTotal,
+		resyncLastCompleted,
+		resyncLastDuration,
 	)
 }
 
 func main() {
+	setup()
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
@@ -437,6 +488,10 @@ func main() {
 	defer tracker.Close()
 	log.Info().Msg("Tracker is ready")
 
+	if err := ensureDesignDocs(ctx, db); err != nil {
+		log.Fatal().Err(err).Msg("Failed to ensure design documents")
+	}
+
 	httpMux := http.NewServeMux()
 	httpMux.Handle("/metrics", promhttp.Handler())
 	httpMux.HandleFunc("/health", healthHandler(couchdbClient, tracker))
@@ -448,6 +503,9 @@ func main() {
 	// init stats so that there's no drop in the stats
 	updateStats(ctx, npmClient, db)
 	localLastSyncedSequenceID.Set(float64(tracker.LastSeq()))
+	if _, _, at := tracker.ResyncState(); at != nil {
+		resyncLastCompleted.Set(float64(at.Unix()))
+	}
 
 	var wg sync.WaitGroup
 
@@ -505,6 +563,27 @@ func main() {
 			}
 		}
 	})
+
+	if *fResyncInterval > 0 {
+		wg.Go(func() {
+			// only checks whether a resync is due, which is cheap
+			ticker := time.Tick(time.Minute)
+			log.Info().
+				Dur("interval", *fResyncInterval).
+				Msg("Starting resync scheduler")
+
+			var lastFailure time.Time
+			for {
+				select {
+				case <-ctx.Done():
+					return
+
+				case <-ticker:
+					maybeResync(ctx, npmClient, db, tracker, &lastFailure)
+				}
+			}
+		})
+	}
 
 	wg.Go(func() {
 		defer func() {
@@ -922,6 +1001,8 @@ func applyChangestreamBatch(ctx context.Context, npmClient *npm.Client, db *kivi
 			}
 
 			pkg.Replicator.UpstreamRev = upstreamRev
+			// a package that changes is evidently back in the feed
+			pkg.Replicator.DroppedFromFeedAt = nil
 
 			// background context to make sure all of these are done before actually allowing the goroutine to exit
 			localRev, err := db.Put(context.Background(), change.ID, pkg)
@@ -1029,6 +1110,8 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 		localDocumentCount.With(prometheus.Labels{"status": "deleted"}).Set(float64(deleted))
 		localDocumentCount.With(prometheus.Labels{"status": "is-fixable-with-time"}).Set(float64(isFixableWithTime))
 	}
+
+	updateDroppedStats(ctx, db)
 
 	if *fDownloadsEnabled {
 		dlStatusView := db.Query(ctx, "_design/npm_replication", "downloads_status_count", kivik.Param("group", "true"))
@@ -1168,4 +1251,26 @@ func updateStats(ctx context.Context, npmClient *npm.Client, db *kivik.DB) {
 			}).Set(float64(count))
 		}
 	}
+}
+
+// updateDroppedStats counts the documents the resync marked as dropped from the
+// feed. It reads the view lazily, so that while its index is first built the
+// count lags instead of stalling every other stat behind it.
+func updateDroppedStats(ctx context.Context, db *kivik.DB) {
+	view := db.Query(ctx, "_design/resync", "dropped", kivik.Param("update", "lazy"))
+	defer view.Close()
+
+	dropped := 0
+	if view.Next() {
+		if err := view.ScanValue(&dropped); err != nil {
+			log.Error().Err(err).Msg("failed to read dropped document count")
+			return
+		}
+	}
+	if err := view.Err(); err != nil {
+		log.Error().Err(err).Msg("could not fetch dropped document count")
+		return
+	}
+
+	localDocumentCount.With(prometheus.Labels{"status": "dropped-from-feed"}).Set(float64(dropped))
 }

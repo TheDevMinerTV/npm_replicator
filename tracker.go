@@ -6,12 +6,20 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
 
 type TrackerData struct {
 	LastSeenSeq int64 `json:"last_seen_seq"`
+
+	// ResyncCursor is the last upstream ID a running resync has reconciled,
+	// so a restart resumes it rather than starting over. Empty between runs.
+	ResyncCursor string `json:"resync_cursor,omitempty"`
+	// ResyncSeen counts the upstream IDs the running resync has listed so far.
+	ResyncSeen            int64      `json:"resync_seen,omitempty"`
+	LastResyncCompletedAt *time.Time `json:"last_resync_completed_at,omitempty"`
 }
 
 type Tracker struct {
@@ -63,6 +71,13 @@ func NewTracker(file string, defaultData TrackerData) (*Tracker, error) {
 }
 
 func (t *Tracker) Save() error {
+	t.m.Lock()
+	defer t.m.Unlock()
+
+	return t.save()
+}
+
+func (t *Tracker) save() error {
 	if _, err := t.fd.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
@@ -73,7 +88,14 @@ func (t *Tracker) Save() error {
 		return err
 	}
 
-	return nil
+	// the resync cursor can shrink, which would leave the tail of a longer
+	// previous write behind
+	offset, err := t.fd.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return err
+	}
+
+	return t.fd.Truncate(offset)
 }
 
 func (t *Tracker) Close() {
@@ -95,8 +117,34 @@ func (t *Tracker) LastSeq() int64 {
 
 func (t *Tracker) NewLastSeenSeq(lastSeq int64) {
 	t.m.Lock()
-	t.data.LastSeenSeq = lastSeq
-	t.m.Unlock()
+	defer t.m.Unlock()
 
-	t.Save()
+	t.data.LastSeenSeq = lastSeq
+	t.save()
+}
+
+func (t *Tracker) ResyncState() (cursor string, seen int64, lastCompletedAt *time.Time) {
+	t.m.Lock()
+	defer t.m.Unlock()
+
+	return t.data.ResyncCursor, t.data.ResyncSeen, t.data.LastResyncCompletedAt
+}
+
+func (t *Tracker) SetResyncProgress(cursor string, seen int64) error {
+	t.m.Lock()
+	defer t.m.Unlock()
+
+	t.data.ResyncCursor = cursor
+	t.data.ResyncSeen = seen
+	return t.save()
+}
+
+func (t *Tracker) FinishResync(at time.Time) error {
+	t.m.Lock()
+	defer t.m.Unlock()
+
+	t.data.ResyncCursor = ""
+	t.data.ResyncSeen = 0
+	t.data.LastResyncCompletedAt = &at
+	return t.save()
 }

@@ -41,6 +41,24 @@ func (c *Client) PackageMetadata(ctx context.Context, name string) (*PackageMeta
 	return metadata, nil
 }
 
+// PackageExists reports whether the registry still serves a package publicly.
+// It asks for the abbreviated packument, as only the status code matters.
+func (c *Client) PackageExists(ctx context.Context, name string) (bool, error) {
+	_, _, err := c.registryClient.Get(ctx, fmt.Sprintf("/%s", url.PathEscape(name)), nil, http.Header{
+		"Accept": []string{"application/vnd.npm.install-v1+json"},
+	}, httpclient.ExactStatusCode(http.StatusOK))
+	if err == nil {
+		return true, nil
+	}
+
+	var httpErr httpclient.UnexpectedHTTPStatusCodeError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+
+	return false, err
+}
+
 // TarballSize fetches the byte length of a tarball. npm tarballs sit behind
 // Cloudflare, which strips Content-Length from HEAD responses, so we issue a
 // single-byte range GET and parse Content-Range (format: "bytes 0-0/<total>").

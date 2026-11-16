@@ -18,6 +18,12 @@ type ReplicatorMetadata struct {
 	// is not the same as the evaluated-but-unclassifiable npm.PackageTypeUnknown.
 	PackageType npm.PackageType `json:"packageType,omitempty"`
 
+	// DroppedFromFeedAt is when the daily resync found the package missing from
+	// upstream and the registry answering 404 for it. npm drops packages from
+	// the feed without a deletion record when they're made private, so this is
+	// the only trace of it. Cleared as soon as the package shows up again.
+	DroppedFromFeedAt *time.Time `json:"droppedFromFeedAt,omitempty"`
+
 	FoundInChangestreamButNotInRegistry bool `json:"foundInChangestreamButNotInRegistry"`
 	HasJSONParseError                   bool `json:"hasJSONParseError"`
 	HasInvalidTag                       bool `json:"hasInvalidTag"`
