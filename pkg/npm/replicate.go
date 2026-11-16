@@ -3,6 +3,7 @@ package npm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strconv"
 
@@ -75,4 +76,56 @@ func (c *Client) Changes(ctx context.Context, startSeq int64, limit int) (*Chang
 		Msg("Got changes for range")
 
 	return &response, nil
+}
+
+// AllDocsPageLimit is the largest page replicate.npmjs.com serves; anything
+// above it is answered with 400.
+const AllDocsPageLimit = 10000
+
+type DocRow struct {
+	ID  string
+	Rev string
+}
+
+// AllDocs lists live upstream documents ordered by ID, starting at startKey
+// (inclusive) or at the very first ID if it's empty. The endpoint rejects
+// skip, so callers page by passing the last ID they saw and dropping it.
+//
+// Unlike the changes feed, which only shows what changed, this lists exactly
+// what currently exists: packages that went private disappear from both
+// without a deletion record, but only a listing reveals that they're gone.
+func (c *Client) AllDocs(ctx context.Context, startKey string, limit int) ([]DocRow, error) {
+	q := url.Values{}
+	q.Set("limit", strconv.Itoa(limit))
+	if startKey != "" {
+		key, err := json.Marshal(startKey)
+		if err != nil {
+			return nil, err
+		}
+		q.Set("startkey", string(key))
+	}
+
+	body, err := c.replicateClient.GetJSON(ctx, "/_all_docs", q, nil, httpclient.ExactStatusCode(200))
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Rows []struct {
+			ID    string `json:"id"`
+			Value struct {
+				Rev string `json:"rev"`
+			} `json:"value"`
+		} `json:"rows"`
+	}
+	if err := json.NewDecoder(body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to parse all docs response: %w", err)
+	}
+
+	rows := make([]DocRow, len(response.Rows))
+	for i, row := range response.Rows {
+		rows[i] = DocRow{ID: row.ID, Rev: row.Value.Rev}
+	}
+
+	return rows, nil
 }
