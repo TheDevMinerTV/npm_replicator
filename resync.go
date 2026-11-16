@@ -43,11 +43,8 @@ const (
 
 	resyncRegistryConcurrency = 4
 	resyncFailureBackoff      = 10 * time.Minute
+	resyncConflictAttempts    = 3
 )
-
-// resyncPageSize is how many upstream IDs one page lists. Tests shrink it to
-// exercise paging.
-var resyncPageSize = npm.AllDocsPageLimit
 
 type resyncLocalRow struct {
 	UpstreamRev string
@@ -59,8 +56,9 @@ type resyncPlan struct {
 	// still marked as dropped.
 	Upsert []npm.DocRow
 	// Candidates lists local documents that upstream no longer has and that
-	// aren't marked as dropped yet. They still need the registry to confirm.
-	Candidates []string
+	// aren't marked as dropped yet, with the upstream rev they were seen at.
+	// They still need the registry to confirm.
+	Candidates []npm.DocRow
 }
 
 func planResyncRange(upstream []npm.DocRow, local map[string]resyncLocalRow) resyncPlan {
@@ -78,10 +76,10 @@ func planResyncRange(upstream []npm.DocRow, local map[string]resyncLocalRow) res
 
 	for id, l := range local {
 		if _, ok := inUpstream[id]; !ok && !l.Dropped {
-			plan.Candidates = append(plan.Candidates, id)
+			plan.Candidates = append(plan.Candidates, npm.DocRow{ID: id, Rev: l.UpstreamRev})
 		}
 	}
-	slices.Sort(plan.Candidates)
+	slices.SortFunc(plan.Candidates, func(a, b npm.DocRow) int { return strings.Compare(a.ID, b.ID) })
 
 	return plan
 }
@@ -135,13 +133,18 @@ func maybeResync(ctx context.Context, npmClient *npm.Client, db *kivik.DB, track
 		}
 	}()
 
-	cursor, _, lastCompletedAt := tracker.ResyncState()
+	cursor, _, lastCompletedAt := tracker.GetResyncState()
 	due := cursor != "" || lastCompletedAt == nil || time.Since(*lastCompletedAt) >= *fResyncInterval
 	if !due || time.Since(*lastFailure) < resyncFailureBackoff {
 		return
 	}
 
-	if lag := _upstreamSequenceID.Load() - tracker.LastSeq(); lag > 2*int64(*fChangestreamBatchSize) {
+	// without the upstream sequence there's no telling how far behind we are
+	upstreamSeq := _upstreamSequenceID.Load()
+	if upstreamSeq == 0 {
+		return
+	}
+	if lag := upstreamSeq - tracker.LastSeq(); lag > 2*int64(*fChangestreamBatchSize) {
 		log.Debug().Int64("lag", lag).Msg("resync due, waiting for the changestream to catch up")
 		return
 	}
@@ -158,7 +161,7 @@ func maybeResync(ctx context.Context, npmClient *npm.Client, db *kivik.DB, track
 
 func runResync(ctx context.Context, npmClient *npm.Client, db *kivik.DB, tracker *Tracker) error {
 	start := time.Now()
-	cursor, seen, _ := tracker.ResyncState()
+	cursor, seen, _ := tracker.GetResyncState()
 
 	info, err := npmClient.Info(ctx)
 	if err != nil {
@@ -230,8 +233,19 @@ func runResync(ctx context.Context, npmClient *npm.Client, db *kivik.DB, tracker
 				Msg("too many local documents missing upstream in one range, not marking any as dropped")
 			count("drop_aborted", len(plan.Candidates))
 		} else {
-			for action, n := range resyncDropCandidates(ctx, npmClient, db, plan.Candidates) {
+			dropCounts := resyncDropCandidates(ctx, npmClient, db, plan.Candidates)
+			for action, n := range dropCounts {
 				count(action, n)
+			}
+
+			// keep the cursor on this page if its checks were cut short, so
+			// they're redone rather than put off until the next run. A single
+			// package failing doesn't hold up the rest of the listing.
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if failed := dropCounts["error"]; failed > 0 && failed*2 >= len(plan.Candidates) {
+				return fmt.Errorf("registry checks failed for %d of %d candidates after %q", failed, len(plan.Candidates), cursor)
 			}
 		}
 
@@ -267,7 +281,7 @@ func fetchUpstreamPage(ctx context.Context, npmClient *npm.Client, cursor string
 	logger := log.With().Str("cursor", cursor).Logger()
 
 	err = retry.ExponentialBackoff(ctx, 4, 5*time.Second, func() error {
-		rows, err = npmClient.AllDocs(ctx, cursor, resyncPageSize)
+		rows, err = npmClient.AllDocs(ctx, cursor, npm.AllDocsPageLimit)
 
 		var httpErr httpclient.UnexpectedHTTPStatusCodeError
 		if errors.As(err, &httpErr) && httpErr.StatusCode < 500 {
@@ -279,7 +293,7 @@ func fetchUpstreamPage(ctx context.Context, npmClient *npm.Client, cursor string
 		return nil, false, err
 	}
 
-	full = len(rows) == resyncPageSize
+	full = len(rows) == npm.AllDocsPageLimit
 	// startkey is inclusive, and the cursor was already reconciled
 	if cursor != "" && len(rows) > 0 && rows[0].ID == cursor {
 		rows = rows[1:]
@@ -328,10 +342,23 @@ func localResyncRange(ctx context.Context, db *kivik.DB, after, until string) (m
 	return local, view.Err()
 }
 
-// resyncUpsert brings one local document in line with its upstream listing.
-// It rereads the document, since the changestream may have moved it on since
-// the range was read. The returned action is empty if nothing was written.
+// resyncUpsert brings one local document in line with its upstream listing,
+// retrying when another writer got to it first. The returned action is empty
+// if nothing was written.
 func resyncUpsert(ctx context.Context, db *kivik.DB, row npm.DocRow) (string, error) {
+	for range resyncConflictAttempts - 1 {
+		action, err := resyncUpsertOnce(ctx, db, row)
+		if action != "conflict" {
+			return action, err
+		}
+	}
+
+	return resyncUpsertOnce(ctx, db, row)
+}
+
+// resyncUpsertOnce rereads the document, since the changestream may have moved
+// it on since the range was read.
+func resyncUpsertOnce(ctx context.Context, db *kivik.DB, row npm.DocRow) (string, error) {
 	var pkg replicator.RegistryPackage
 
 	exists := true
@@ -380,7 +407,7 @@ func resyncUpsert(ctx context.Context, db *kivik.DB, row npm.DocRow) (string, er
 // resyncDropCandidates marks the candidates the registry no longer serves as
 // dropped. Those it still serves are missing from the listing alone, which
 // happens, and are left as they are.
-func resyncDropCandidates(ctx context.Context, npmClient *npm.Client, db *kivik.DB, candidates []string) map[string]int {
+func resyncDropCandidates(ctx context.Context, npmClient *npm.Client, db *kivik.DB, candidates []npm.DocRow) map[string]int {
 	var (
 		m      sync.Mutex
 		counts = map[string]int{}
@@ -388,12 +415,17 @@ func resyncDropCandidates(ctx context.Context, npmClient *npm.Client, db *kivik.
 		sem    = make(chan struct{}, resyncRegistryConcurrency)
 	)
 
-	for _, id := range candidates {
+	for _, candidate := range candidates {
 		sem <- struct{}{}
 		wg.Go(func() {
 			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error().Interface("recovered", r).Str("package_id", candidate.ID).Msg("recovered from panic in resync drop check")
+				}
+			}()
 
-			action := resyncDropCandidate(ctx, npmClient, db, id)
+			action := resyncDropCandidate(ctx, npmClient, db, candidate)
 			if action == "" {
 				return
 			}
@@ -408,7 +440,8 @@ func resyncDropCandidates(ctx context.Context, npmClient *npm.Client, db *kivik.
 	return counts
 }
 
-func resyncDropCandidate(ctx context.Context, npmClient *npm.Client, db *kivik.DB, id string) string {
+func resyncDropCandidate(ctx context.Context, npmClient *npm.Client, db *kivik.DB, candidate npm.DocRow) string {
+	id := candidate.ID
 	log := log.With().Str("package_id", id).Logger()
 
 	exists, err := npmClient.PackageExists(ctx, id)
@@ -430,7 +463,9 @@ func resyncDropCandidate(ctx context.Context, npmClient *npm.Client, db *kivik.D
 		log.Error().Err(err).Msg("could not read document to mark as dropped")
 		return "error"
 	}
-	if pkg.Replicator.DroppedFromFeedAt != nil {
+	// a different rev means it was published again since the range was read,
+	// possibly after the registry answered
+	if pkg.Replicator.DroppedFromFeedAt != nil || pkg.Replicator.UpstreamRev != candidate.Rev {
 		return ""
 	}
 

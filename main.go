@@ -75,7 +75,7 @@ func healthHandler(client *kivik.Client, tracker *Tracker) http.HandlerFunc {
 			body.LastChangeAgeSeconds = &age
 		}
 
-		if _, _, at := tracker.ResyncState(); at != nil {
+		if _, _, at := tracker.GetResyncState(); at != nil {
 			age := int64(time.Since(*at).Seconds())
 			body.LastResyncAgeSeconds = &age
 		}
@@ -350,8 +350,6 @@ var (
 	fWebhookAuthorizations stringSlice
 )
 
-// setup parses flags and registers metrics. It isn't init, because flag.Parse
-// there would choke on the flags of a test binary.
 func setup() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
@@ -488,8 +486,16 @@ func main() {
 	defer tracker.Close()
 	log.Info().Msg("Tracker is ready")
 
+	resyncEnabled := *fResyncInterval > 0
 	if err := ensureDesignDocs(ctx, db); err != nil {
-		log.Fatal().Err(err).Msg("Failed to ensure design documents")
+		if status := kivik.HTTPStatus(err); status != http.StatusUnauthorized && status != http.StatusForbidden {
+			log.Fatal().Err(err).Msg("Failed to ensure design documents")
+		}
+
+		// writing design documents takes a database admin, which the rest of
+		// the replicator doesn't need
+		log.Error().Err(err).Msg("Not allowed to write design documents, resync is disabled")
+		resyncEnabled = false
 	}
 
 	httpMux := http.NewServeMux()
@@ -503,7 +509,7 @@ func main() {
 	// init stats so that there's no drop in the stats
 	updateStats(ctx, npmClient, db)
 	localLastSyncedSequenceID.Set(float64(tracker.LastSeq()))
-	if _, _, at := tracker.ResyncState(); at != nil {
+	if _, _, at := tracker.GetResyncState(); at != nil {
 		resyncLastCompleted.Set(float64(at.Unix()))
 	}
 
@@ -564,7 +570,7 @@ func main() {
 		}
 	})
 
-	if *fResyncInterval > 0 {
+	if resyncEnabled {
 		wg.Go(func() {
 			// only checks whether a resync is due, which is cheap
 			ticker := time.Tick(time.Minute)

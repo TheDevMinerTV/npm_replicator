@@ -74,10 +74,10 @@ func (t *Tracker) Save() error {
 	t.m.Lock()
 	defer t.m.Unlock()
 
-	return t.save()
+	return t.saveLocked()
 }
 
-func (t *Tracker) save() error {
+func (t *Tracker) saveLocked() error {
 	if _, err := t.fd.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
@@ -88,8 +88,8 @@ func (t *Tracker) save() error {
 		return err
 	}
 
-	// the resync cursor can shrink, which would leave the tail of a longer
-	// previous write behind
+	// the file size may change between saves, so cut off whatever a longer
+	// previous write left behind
 	offset, err := t.fd.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return err
@@ -120,10 +120,10 @@ func (t *Tracker) NewLastSeenSeq(lastSeq int64) {
 	defer t.m.Unlock()
 
 	t.data.LastSeenSeq = lastSeq
-	t.save()
+	t.saveLocked()
 }
 
-func (t *Tracker) ResyncState() (cursor string, seen int64, lastCompletedAt *time.Time) {
+func (t *Tracker) GetResyncState() (cursor string, seen int64, lastCompletedAt *time.Time) {
 	t.m.Lock()
 	defer t.m.Unlock()
 
@@ -136,7 +136,7 @@ func (t *Tracker) SetResyncProgress(cursor string, seen int64) error {
 
 	t.data.ResyncCursor = cursor
 	t.data.ResyncSeen = seen
-	return t.save()
+	return t.saveLocked()
 }
 
 func (t *Tracker) FinishResync(at time.Time) error {
@@ -146,5 +146,5 @@ func (t *Tracker) FinishResync(at time.Time) error {
 	t.data.ResyncCursor = ""
 	t.data.ResyncSeen = 0
 	t.data.LastResyncCompletedAt = &at
-	return t.save()
+	return t.saveLocked()
 }
